@@ -1,13 +1,17 @@
 # Go
-/dist/
+**/dist/
 *.test
 *.out
-styrixa
-styrixa.exe
+# gebaute Binaries (nicht der Quellordner cmd/styrixa/)
+/styrixa
+/styrixa.exe
+/cms-template/styrixa
+/factory-api/factory-api
+/factory-api/builds/
 *.db
 *.db-*
 # Node
 node_modules/
-factory-ui/dist/
+factory-ui**/dist/
 # OS
 .DS_Store

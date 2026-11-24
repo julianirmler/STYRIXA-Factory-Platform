@@ -7,7 +7,7 @@ Custom-CMS-Generator von **STYRIXA Digital Technology Studio**. Nutzer wählen M
 | Ordner | Inhalt | Stand |
 |---|---|---|
 | `factory-ui/` | React + Vite + Tailwind Configurator (Modulauswahl, Ziel-OS, Build) | UI-Mockup (`src/StyrixaFactoryConfigurator.jsx`), Build simuliert |
-| `factory-api/` | Go-Backend: nimmt Build-Config entgegen, führt `go build -tags …` aus, liefert `.tar.gz` | geplant |
+| `factory-api/` | Go-Backend: Build-Worker und Deploy-Dienst (SSH / FTPS) | Deploy fertig + getestet, Build-Endpunkt geplant |
 | `cms-template/` | STYRIXA-CMS-Quellcode, Module per `//go:build mod_<name>` | Kern-Registry, Shop-Modul (Gerüst), Media-Platzhalter |
 
 ## Module
@@ -34,6 +34,33 @@ cd cms-template
 go test ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
   -tags "mod_media mod_shop" -o dist/styrixa ./cmd/styrixa
+```
+
+## Auslieferung / Deployment
+
+Nach dem Build wählt der Kunde in Schritt 4:
+
+| Weg | Für | Ablauf |
+|---|---|---|
+| **Download** | Selbst-Installation | `.tar.gz` herunterladen |
+| **SSH** | VPS, Managed Server, Hosting mit SSH | Plattform-Check (`uname`) → `releases/<zeitstempel>/` → atomarer Wechsel von `current` → systemd-User-Service (Fallback nohup) → Health-Check per SSH-Tunnel → bei Fehler automatischer Rollback; 3 Releases bleiben erhalten |
+| **FTP(S)** | Shared-Webspace mit Apache | Binary als `styrixa.cgi` + `.htaccess` (CGI-Routing), geschützter Datenordner `styrixa-data/`, bestehende `.htaccess` wird gesichert, `styrixa.db` nie überschrieben → Health-Check über die Website-URL → bei Fehler vorherige `styrixa.cgi` zurück |
+
+Sicherheit:
+- Server-Identität wird immer geprüft: SSH-Host-Key bzw. FTPS-Zertifikat per SHA-256-Fingerprint, den der Kunde im UI bestätigt (danach gepinnt; Abweichung = Abbruch).
+- Zugangsdaten nur für die Dauer des Deployments im Speicher, nie geloggt oder gespeichert.
+- SSRF-Schutz: Die Factory verbindet sich nur mit öffentlichen IP-Adressen (kein localhost, keine privaten Netze, keine Cloud-Metadaten).
+- Unverschlüsseltes FTP nur mit ausdrücklicher Freigabe.
+
+API: `POST /api/builds/{id}/deploy` streamt das Deploy-Log als Server-Sent Events (`log`, `identity`, `result`, `error`).
+
+Das CMS erkennt den CGI-Modus automatisch (`GATEWAY_INTERFACE`) und bietet `/healthz`.
+
+```bash
+cd factory-api
+go mod tidy          # erzeugt go.sum (Checksummen werden gegen sum.golang.org geprüft)
+go get -u golang.org/x/crypto && go mod tidy   # aktuelle Sicherheitsfixes
+go test ./...        # FTP-Tests brauchen: pip install pyftpdlib pyopenssl
 ```
 
 ## Hinweis Shop

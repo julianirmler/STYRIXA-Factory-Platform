@@ -25,6 +25,12 @@ import {
   Hash,
   Boxes,
   ShoppingCart,
+  UploadCloud,
+  KeyRound,
+  Globe,
+  AlertTriangle,
+  Fingerprint,
+  X,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -128,6 +134,32 @@ const TARGETS = [
   { id: "windows-amd64", goos: "windows", goarch: "amd64", label: "Windows", sub: "x86_64 · .exe", icon: Monitor },
 ];
 
+// Auslieferungswege nach dem Build
+const DELIVERY = [
+  {
+    id: "download",
+    label: "Download",
+    sub: ".tar.gz selbst installieren",
+    icon: Download,
+  },
+  {
+    id: "ssh",
+    label: "Server per SSH",
+    sub: "VPS, Managed Server, Hosting mit SSH",
+    icon: Server,
+    badge: "Empfohlen",
+  },
+  {
+    id: "ftp",
+    label: "Webspace per FTP(S)",
+    sub: "Shared Hosting mit Apache (CGI-Modus)",
+    icon: Globe,
+  },
+];
+
+// true = Deploy wird im Browser simuliert; false = echte factory-api (SSE)
+const MOCK_DEPLOY = true;
+
 const BASE_SIZE_KB = 7800; // Go-Runtime + net/http + modernc.org/sqlite + Installer
 
 const BUILD_STEPS = [
@@ -172,6 +204,28 @@ export default function StyrixaFactoryConfigurator() {
   const [siteName, setSiteName] = useState("styrixa-cms");
   const [region, setRegion] = useState("de-AT");
   const [notice, setNotice] = useState(null);
+
+  // Auslieferung / Deploy
+  const [delivery, setDelivery] = useState("download");
+  const [dep, setDep] = useState({
+    host: "",
+    port: "",
+    user: "",
+    auth: "password", // password | key
+    password: "",
+    privateKey: "",
+    remoteDir: "styrixa",
+    docroot: "/httpdocs",
+    appPort: 8080,
+    publicUrl: "https://",
+    tls: "explicit",
+  });
+  const [deployPhase, setDeployPhase] = useState("idle"); // idle | running | confirm | done | error
+  const [deployLogs, setDeployLogs] = useState([]);
+  const [identity, setIdentity] = useState(null); // {kind, fingerprint, mismatch}
+  const [confirmedFp, setConfirmedFp] = useState("");
+  const [deployResult, setDeployResult] = useState(null);
+  const deployTimers = useRef([]);
 
   // Build-State
   const [phase, setPhase] = useState("idle"); // idle | running | done
@@ -256,7 +310,17 @@ export default function StyrixaFactoryConfigurator() {
     if (phase === "done") resetBuild();
   }
 
+  function resetDeploy() {
+    deployTimers.current.forEach(clearTimeout);
+    deployTimers.current = [];
+    setDeployPhase("idle");
+    setDeployLogs([]);
+    setIdentity(null);
+    setDeployResult(null);
+  }
+
   function resetBuild() {
+    resetDeploy();
     timers.current.forEach(clearTimeout);
     timers.current = [];
     setPhase("idle");
@@ -315,6 +379,144 @@ export default function StyrixaFactoryConfigurator() {
         }, acc)
       );
     });
+  }
+
+  const setD = (k) => (e) => setDep((d) => ({ ...d, [k]: e.target.value }));
+  const depLocked = deployPhase === "running";
+
+  const deployErrors = useMemo(() => {
+    if (delivery === "download") return [];
+    const e = [];
+    if (!/^[A-Za-z0-9.-]+$/.test(dep.host)) e.push("Host ohne Protokoll angeben, z. B. ftp.kunde.at");
+    if (!/^[A-Za-z0-9._@+-]+$/.test(dep.user)) e.push("Benutzername fehlt");
+    if (dep.auth === "password" && !dep.password) e.push("Passwort fehlt");
+    if (delivery === "ssh" && dep.auth === "key" && !dep.privateKey.includes("PRIVATE KEY")) e.push("Privater Schlüssel fehlt");
+    if (delivery === "ftp" && !/^https?:\/\/[^/]+/.test(dep.publicUrl)) e.push("Website-URL für den Health-Check fehlt");
+    if (delivery === "ftp" && tgt.goos !== "linux") e.push("Webspace läuft auf Linux – Zielplattform Linux wählen");
+    return e;
+  }, [delivery, dep, tgt]);
+
+  const pushLog = (level, msg) =>
+    setDeployLogs((l) => [...l, { level, msg, t: new Date().toLocaleTimeString("de-AT") }]);
+
+  function deployTarget(fp) {
+    const base = {
+      method: delivery,
+      host: dep.host,
+      port: Number(dep.port) || 0,
+      user: dep.user,
+      publicUrl: dep.publicUrl === "https://" ? "" : dep.publicUrl,
+      fingerprint: fp,
+    };
+    return delivery === "ssh"
+      ? { ...base, remoteDir: dep.remoteDir, appPort: Number(dep.appPort) || 8080 }
+      : { ...base, remoteDir: dep.docroot, tls: dep.tls };
+  }
+
+  // Echte Anbindung: POST /api/builds/{id}/deploy → Server-Sent Events
+  async function streamDeploy(fp) {
+    const res = await fetch(`/api/builds/${result.id}/deploy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target: deployTarget(fp),
+        password: dep.auth === "password" ? dep.password : "",
+        privateKey: dep.auth === "key" ? dep.privateKey : "",
+      }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const ev = /^event: (.*)$/m.exec(chunk)?.[1];
+        const data = JSON.parse(/^data: (.*)$/m.exec(chunk)?.[1] || "{}");
+        if (ev === "log") pushLog(data.level, data.msg);
+        if (ev === "identity") { setIdentity(data); setDeployPhase("confirm"); }
+        if (ev === "result") { setDeployResult(data); setDeployPhase("done"); }
+        if (ev === "error") { pushLog("error", data.message); setDeployPhase("error"); }
+      }
+    }
+  }
+
+  // Simulation für den Mockup
+  function mockDeploy(fp) {
+    const isSSH = delivery === "ssh";
+    const fakeFp = isSSH ? "SHA256:q7nF2c9xVb1kPz0R8mWlT4aYd6sHgE3uJiK5oNpQrS0" : "SHA256:Zk3P8sWq1LmN7bVx2cR5tY9uI0oPaS4dF6gH8jK1lE0";
+    const kind = isSSH ? "ssh-host-key" : "tls-certificate";
+    const steps = [[300, "info", `Verbinde mit ${dep.host}${isSSH ? ":" + (dep.port || 22) : ":" + (dep.port || 21) + " (FTPS)"} als ${dep.user} …`]];
+    if (!fp) {
+      steps.forEach(([d, l, m]) => deployTimers.current.push(setTimeout(() => pushLog(l, m), d)));
+      deployTimers.current.push(setTimeout(() => {
+        setIdentity({ kind, fingerprint: fakeFp, mismatch: false });
+        setDeployPhase("confirm");
+      }, 900));
+      return;
+    }
+    const rel = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+    const more = isSSH
+      ? [
+          [400, "ok", `Verbunden, Host-Key ${fp.slice(0, 18)}… bestätigt`],
+          [400, "ok", `Server-Plattform ${tgt.goos}/${tgt.goarch} passt`],
+          [700, "info", `Lade Binary hoch (${fmtSize(estKb)}) …`],
+          [900, "ok", `Release ${rel} hochgeladen`],
+          [300, "ok", `current → releases/${rel}`],
+          [500, "ok", `systemd-User-Service ${"styrixa-" + slug} gestartet`],
+          [700, "info", `Health-Check 127.0.0.1:${dep.appPort}/healthz …`],
+          [600, "ok", "App antwortet"],
+        ]
+      : [
+          [400, "ok", `Angemeldet als ${dep.user} (FTPS, Zertifikat gepinnt)`],
+          [300, "ok", "Datenordner styrixa-data/ angelegt und geschützt"],
+          [900, "info", `Lade styrixa.cgi hoch (${fmtSize(estKb)}) …`],
+          [500, "ok", "styrixa.cgi aktiv (Rechte 755)"],
+          [400, "warn", `Bestehende .htaccess gesichert als .htaccess.styrixa-backup-${rel}`],
+          [300, "ok", "CGI-Routing eingerichtet"],
+          [700, "info", `Health-Check ${dep.publicUrl.replace(/\/$/, "")}/healthz …`],
+          [600, "ok", "Website antwortet"],
+        ];
+    let acc = 0;
+    [...steps, ...more].forEach(([d, l, m]) => {
+      acc += d;
+      deployTimers.current.push(setTimeout(() => pushLog(l, m), acc));
+    });
+    deployTimers.current.push(
+      setTimeout(() => {
+        setDeployResult({
+          release: rel,
+          url: dep.publicUrl === "https://" ? "" : dep.publicUrl,
+          hints: isSSH
+            ? [`App lauscht auf 127.0.0.1:${dep.appPort} – Domain per Caddy/nginx darauf zeigen lassen.`]
+            : ["CGI-Modus: ideal für kleine bis mittlere Websites."],
+          caddy: isSSH ? `${(dep.publicUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "")) || "kunde.at"} {\n\treverse_proxy 127.0.0.1:${dep.appPort}\n}` : null,
+        });
+        setDeployPhase("done");
+      }, acc + 300)
+    );
+  }
+
+  function startDeploy(fp = confirmedFp) {
+    resetDeploy();
+    setDeployPhase("running");
+    if (MOCK_DEPLOY) return mockDeploy(fp);
+    streamDeploy(fp).catch((e) => {
+      pushLog("error", e.message);
+      setDeployPhase("error");
+    });
+  }
+
+  function confirmIdentity() {
+    const fp = identity.fingerprint;
+    setConfirmedFp(fp);
+    setIdentity(null);
+    startDeploy(fp);
   }
 
   function copyCmd() {
@@ -563,6 +765,130 @@ export default function StyrixaFactoryConfigurator() {
               Seitentitel, GISA-Nummer und Admin-Account werden erst beim ersten Start unter <span className="font-mono">/install</span> gesetzt.
             </p>
           </div>
+
+          {/* Auslieferung */}
+          <div className="mt-12">
+            <p className="mb-2 font-mono text-xs uppercase tracking-[0.25em] text-cyan-400">Schritt 4 · Auslieferung</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              {DELIVERY.map((d) => {
+                const on = d.id === delivery;
+                const Icon = d.icon;
+                return (
+                  <button
+                    key={d.id}
+                    disabled={locked || depLocked}
+                    onClick={() => {
+                      setDelivery(d.id);
+                      setConfirmedFp("");
+                      resetDeploy();
+                      setDep((x) => ({ ...x, port: "", auth: d.id === "ftp" ? "password" : x.auth }));
+                    }}
+                    className={[
+                      "relative rounded-xl border p-4 text-left transition disabled:opacity-60",
+                      on ? "border-cyan-400/60 bg-cyan-500/10" : "border-slate-800 bg-slate-900/50 hover:border-slate-600",
+                    ].join(" ")}
+                  >
+                    {d.badge && (
+                      <span className="absolute right-3 top-3 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                        {d.badge}
+                      </span>
+                    )}
+                    <Icon className={`mb-3 h-5 w-5 ${on ? "text-cyan-300" : "text-slate-500"}`} />
+                    <div className="text-sm font-semibold text-white">{d.label}</div>
+                    <div className="text-xs text-slate-500">{d.sub}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {delivery !== "download" && (
+              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+                <div className="grid gap-4 md:grid-cols-[1fr_110px]">
+                  <Field label={delivery === "ssh" ? "SSH-Host" : "FTP-Host"}>
+                    <input value={dep.host} onChange={setD("host")} disabled={depLocked}
+                      placeholder={delivery === "ssh" ? "server.kunde.at" : "ftp.kunde.at"} className={inputCls + " font-mono"} />
+                  </Field>
+                  <Field label="Port">
+                    <input value={dep.port} onChange={setD("port")} disabled={depLocked}
+                      placeholder={delivery === "ssh" ? "22" : dep.tls === "implicit" ? "990" : "21"} className={inputCls + " font-mono"} />
+                  </Field>
+                </div>
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Field label="Benutzer">
+                    <input value={dep.user} onChange={setD("user")} disabled={depLocked} autoComplete="off" className={inputCls + " font-mono"} />
+                  </Field>
+                  {delivery === "ssh" ? (
+                    <Field label="Anmeldung">
+                      <div className="flex rounded-lg border border-slate-700 p-0.5 text-xs">
+                        {[["password", "Passwort"], ["key", "Deploy-Key"]].map(([k, l]) => (
+                          <button key={k} type="button" disabled={depLocked}
+                            onClick={() => setDep((d) => ({ ...d, auth: k }))}
+                            className={`flex-1 rounded-md px-2 py-1.5 ${dep.auth === k ? "bg-slate-700 text-white" : "text-slate-400"}`}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+                  ) : (
+                    <Field label="Verschlüsselung">
+                      <select value={dep.tls} onChange={setD("tls")} disabled={depLocked} className={inputCls}>
+                        <option value="explicit">FTPS – explizites TLS (Port 21)</option>
+                        <option value="implicit">FTPS – implizites TLS (Port 990)</option>
+                      </select>
+                    </Field>
+                  )}
+                </div>
+
+                {dep.auth === "key" && delivery === "ssh" ? (
+                  <Field label="Privater SSH-Schlüssel (ohne Passphrase)" className="mt-4">
+                    <textarea value={dep.privateKey} onChange={setD("privateKey")} disabled={depLocked} rows={3}
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" className={inputCls + " font-mono text-[11px]"} />
+                  </Field>
+                ) : (
+                  <Field label="Passwort" className="mt-4">
+                    <input type="password" value={dep.password} onChange={setD("password")} disabled={depLocked}
+                      autoComplete="new-password" className={inputCls} />
+                  </Field>
+                )}
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  {delivery === "ssh" ? (
+                    <>
+                      <Field label="App-Ordner (relativ zu ~)">
+                        <input value={dep.remoteDir} onChange={setD("remoteDir")} disabled={depLocked} className={inputCls + " font-mono"} />
+                      </Field>
+                      <Field label="Interner App-Port">
+                        <input value={dep.appPort} onChange={setD("appPort")} disabled={depLocked} className={inputCls + " font-mono"} />
+                      </Field>
+                    </>
+                  ) : (
+                    <Field label="Document-Root">
+                      <input value={dep.docroot} onChange={setD("docroot")} disabled={depLocked} className={inputCls + " font-mono"} />
+                    </Field>
+                  )}
+                  <Field label={delivery === "ftp" ? "Website-URL (für Health-Check)" : "Domain (optional)"}>
+                    <input value={dep.publicUrl} onChange={setD("publicUrl")} disabled={depLocked} className={inputCls + " font-mono"} />
+                  </Field>
+                </div>
+
+                <div className="mt-4 flex items-start gap-2 rounded-lg bg-slate-950/60 p-3 text-xs leading-relaxed text-slate-400">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+                  <span>
+                    Zugangsdaten werden nur für dieses Deployment verwendet und nicht gespeichert.
+                    {delivery === "ssh"
+                      ? " Ablauf: Plattform-Check → Release-Ordner → atomarer Wechsel → systemd-Dienst → Health-Check, bei Fehler automatischer Rollback."
+                      : " Das CMS läuft im CGI-Modus (Apache mit .htaccess nötig). Eine bestehende .htaccess wird gesichert, eine vorhandene styrixa.db nie überschrieben."}
+                  </span>
+                </div>
+                {delivery === "ftp" && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200/90">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    Achtung: Der Document-Root wird vom STYRIXA CMS übernommen. Bestehende Website vorher sichern.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ------------------------- Rechte Spalte ------------------------- */}
@@ -700,6 +1026,17 @@ export default function StyrixaFactoryConfigurator() {
                     <br />
                     <span className="text-slate-500"># → http://host:8080/install</span>
                   </div>
+                  {delivery !== "download" && (
+                    <DeployPanel
+                      delivery={delivery}
+                      phase={deployPhase}
+                      logs={deployLogs}
+                      result={deployResult}
+                      errors={deployErrors}
+                      host={dep.host}
+                      onDeploy={() => startDeploy()}
+                    />
+                  )}
                   <button
                     onClick={resetBuild}
                     className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-500"
@@ -733,9 +1070,135 @@ export default function StyrixaFactoryConfigurator() {
         </aside>
       </main>
 
+      {deployPhase === "confirm" && identity && (
+        <IdentityModal identity={identity} host={dep.host} onConfirm={confirmIdentity}
+          onCancel={() => { setIdentity(null); setDeployPhase("idle"); pushLog("warn", "Deployment abgebrochen – Fingerprint nicht bestätigt"); }} />
+      )}
+
       <footer className="relative border-t border-slate-800/80 py-6 text-center text-xs text-slate-600">
         STYRIXA Digital Technology Studio · Graz · Factory Platform Preview
       </footer>
+    </div>
+  );
+}
+
+/* ------------------------- Hilfskomponenten ------------------------- */
+const inputCls =
+  "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 disabled:opacity-60";
+
+function Field({ label, children, className = "" }) {
+  return (
+    <label className={"block " + className}>
+      <span className="mb-1.5 block text-xs text-slate-400">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function DeployPanel({ delivery, phase, logs, result, errors, host, onDeploy }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [logs]);
+  const color = { ok: "text-emerald-300", warn: "text-amber-300", error: "text-rose-300", info: "text-slate-400" };
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
+        <UploadCloud className="h-4 w-4 text-cyan-300" />
+        {delivery === "ssh" ? "Auf Server deployen" : "Auf Webspace deployen"}
+      </div>
+
+      {phase === "idle" || phase === "error" ? (
+        <>
+          {errors.length > 0 ? (
+            <ul className="mb-3 space-y-1 text-xs text-amber-300/90">
+              {errors.map((e) => (
+                <li key={e}>• {e}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mb-3 text-xs text-slate-500">
+              Ziel: <span className="font-mono text-slate-300">{host}</span> · Zugangsdaten aus Schritt 4
+            </p>
+          )}
+          <button
+            onClick={onDeploy}
+            disabled={errors.length > 0}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-400 px-4 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <UploadCloud className="h-4 w-4" /> {phase === "error" ? "Erneut versuchen" : "Jetzt deployen"}
+          </button>
+        </>
+      ) : null}
+
+      {logs.length > 0 && (
+        <div ref={ref} className="mt-3 max-h-40 overflow-y-auto rounded-lg bg-black/60 p-2.5 font-mono text-[10.5px] leading-relaxed">
+          {logs.map((l, i) => (
+            <div key={i} className={color[l.level] || "text-slate-400"}>
+              <span className="text-slate-600">{l.t} </span>
+              {l.msg}
+            </div>
+          ))}
+          {phase === "running" && <span className="inline-block h-3 w-1.5 animate-pulse bg-cyan-300" />}
+        </div>
+      )}
+
+      {phase === "done" && result && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+            <Check className="h-4 w-4" /> Live – Release <span className="font-mono text-xs">{result.release}</span>
+          </div>
+          {result.url && (
+            <a href={result.url.replace(/\/$/, "") + "/install"} target="_blank" rel="noreferrer"
+              className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-200">
+              <Globe className="h-4 w-4" /> Installer öffnen
+            </a>
+          )}
+          {result.hints?.map((h) => (
+            <p key={h} className="text-[11px] text-slate-500">{h}</p>
+          ))}
+          {result.caddy && (
+            <pre className="overflow-x-auto rounded-lg bg-black/60 p-2.5 font-mono text-[10.5px] text-emerald-300/90">{result.caddy}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IdentityModal({ identity, host, onConfirm, onCancel }) {
+  const ssh = identity.kind === "ssh-host-key";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${identity.mismatch ? "bg-rose-500/15 text-rose-300" : "bg-cyan-500/15 text-cyan-300"}`}>
+            {identity.mismatch ? <AlertTriangle className="h-5 w-5" /> : <Fingerprint className="h-5 w-5" />}
+          </div>
+          <button onClick={onCancel} className="text-slate-500 hover:text-white"><X className="h-5 w-5" /></button>
+        </div>
+        <h3 className="text-lg font-semibold text-white">
+          {identity.mismatch ? "Server-Identität hat sich geändert" : ssh ? "SSH-Host-Key bestätigen" : "FTPS-Zertifikat bestätigen"}
+        </h3>
+        <p className="mt-2 text-sm leading-relaxed text-slate-400">
+          {identity.mismatch
+            ? "Der Fingerprint weicht vom zuletzt bestätigten Wert ab. Das kann ein Serverwechsel sein – oder ein Angriff. Nur fortfahren, wenn der Hoster die Änderung bestätigt."
+            : `Erste Verbindung zu ${host}. Vergleiche den Fingerprint mit der Angabe in deinem Hoster-Panel, bevor du Zugangsdaten überträgst.`}
+        </p>
+        <div className="mt-4 rounded-lg border border-slate-700 bg-black/50 p-3">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">{ssh ? "Host-Key" : "Zertifikat"} · SHA-256</div>
+          <div className="break-all font-mono text-xs text-cyan-200">{identity.fingerprint}</div>
+        </div>
+        <div className="mt-5 flex gap-2">
+          <button onClick={onCancel} className="flex-1 rounded-lg border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-500">
+            Abbrechen
+          </button>
+          <button onClick={onConfirm}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-bold ${identity.mismatch ? "bg-rose-500 text-white hover:bg-rose-400" : "bg-cyan-400 text-slate-950 hover:bg-cyan-300"}`}>
+            <span className="inline-flex items-center gap-1.5"><KeyRound className="h-4 w-4" /> Vertrauen &amp; deployen</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
