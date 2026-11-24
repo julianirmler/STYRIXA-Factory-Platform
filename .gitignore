@@ -15,3 +15,6 @@ node_modules/
 factory-ui**/dist/
 # OS
 .DS_Store
+
+# Schlüssel – niemals committen
+*.secret

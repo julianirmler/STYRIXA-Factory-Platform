@@ -4,6 +4,10 @@ Projektregeln für Claude Code. Vor jeder Session lesen, zusammen mit `docs/adr/
 
 **Leitlinie:** Immer die günstigste Lösung, die das Problem vollständig löst – Standardbibliothek vor Abhängigkeit, vorhandenes Werkzeug vor Eigenbau, kein Server, wo ein statisches Artefakt reicht.
 
+## Aktuelle Phase
+
+@docs/phasen/PHASE-0.md
+
 ## Was das ist
 
 Die Factory liefert aus einer Modulauswahl ein maßgeschneidertes **STYRIXA CMS** als CGO-freies Go-Single-Binary mit eingebetteter SQLite aus – als Download oder per Deploy (SSH / FTPS). Alle gültigen Modul-Kombinationen werden bei jedem Release in GitHub Actions **vorgebaut und signiert** (ADR-004); die Factory baut nicht selbst.

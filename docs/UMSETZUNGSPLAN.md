@@ -30,7 +30,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 ## Phase 0 – Fundament (1 Session)
 
-- [ ] **0.1** `go.sum` für `factory-api` erzeugen (`go mod tidy`, verifiziert), Signaturschlüssel erzeugen (`cd cms-template && go run ./tools/sign -keygen`), `STYRIXA_SIGNING_KEY` als GitHub-Secret anlegen, öffentlichen Schlüssel in `cms-template/internal/core/pubkey.go` eintragen, ersten Test-Release `v0.0.1` taggen
+- [ ] **0.1** `go.sum` für `factory-api` erzeugen (verifiziert), Signaturschlüssel erzeugen und als GitHub-Secret setzen, `core.ReleasePublicKey` + `VerifyRelease`, ersten Test-Release `v0.0.1` taggen – **Anleitung: [`docs/phasen/PHASE-0.md`](phasen/PHASE-0.md)**
   - *Abnahme:* CI grün; Release enthält 144 Pakete + `SHA256SUMS` + `SHA256SUMS.sig` + `modules.json`
 
 ## Phase 1 – CMS-Kern → M1 (6 Sessions)
