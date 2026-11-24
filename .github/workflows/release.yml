@@ -1,0 +1,51 @@
+# Baut bei einem Tag (v*) alle gültigen Modul-Kombinationen für alle Plattformen vor,
+# signiert die Prüfsummen und hängt alles an das GitHub-Release.
+# Die Factory liefert danach nur noch fertige Pakete aus – kein Build-Server nötig.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: scripts/matrix-build.sh ${{ matrix.target }} dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ strategy.job-index }}
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Prüfsummen + Signatur
+        env:
+          STYRIXA_SIGNING_KEY: ${{ secrets.STYRIXA_SIGNING_KEY }}
+        run: |
+          cd dist && sha256sum *.tar.gz > SHA256SUMS && cd ..
+          cp cms-template/modules.json dist/modules.json
+          (cd cms-template && go run ./tools/sign ../dist/SHA256SUMS)
+      - name: GitHub-Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --title "STYRIXA CMS ${{ github.ref_name }}" --generate-notes

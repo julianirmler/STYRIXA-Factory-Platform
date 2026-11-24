@@ -33,17 +33,24 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	health := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Write([]byte("ok"))
-	})
+	}
+	mux.HandleFunc("GET /healthz", health)
 	deps := core.Deps{} // DB folgt im Kern-Schritt
 	for _, m := range mods {
 		m.Mount(mux, deps)
 	}
 
 	if os.Getenv("GATEWAY_INTERFACE") != "" { // von Apache als CGI gestartet
-		if err := cgi.Serve(mux); err != nil {
+		// Hoster-Check der Factory ruft …/styrixa.cgi/healthz in einem Prüfordner auf:
+		// dann ist nur PATH_INFO aussagekräftig, nicht der volle Pfad.
+		h := http.Handler(mux)
+		if os.Getenv("PATH_INFO") == "/healthz" {
+			h = http.HandlerFunc(health)
+		}
+		if err := cgi.Serve(h); err != nil {
 			log.Fatal(err)
 		}
 		return

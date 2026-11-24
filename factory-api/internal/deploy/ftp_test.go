@@ -84,13 +84,20 @@ func fakeBinary(t *testing.T) string {
 	return p
 }
 
-func healthServer(t *testing.T) *httptest.Server {
+// healthServer simuliert einen Apache-Webspace. rewrite=false: mod_rewrite fehlt.
+func healthServer(t *testing.T) *httptest.Server { return fakeApache(t, true) }
+
+func fakeApache(t *testing.T, rewrite bool) *httptest.Server {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		p := r.URL.Path
+		switch {
+		case p == "/healthz", strings.HasSuffix(p, "/styrixa.cgi/healthz"):
 			w.Write([]byte("ok"))
-			return
+		case rewrite && strings.HasSuffix(p, "/ping"):
+			w.Write([]byte("ok"))
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
 	t.Cleanup(s.Close)
 	return s
@@ -182,5 +189,48 @@ func TestDeployFTPRollbackOnFailedHealth(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "styrixa.cgi")); string(b) != "alte version" {
 		t.Fatalf("Rollback hat nicht gegriffen: %q", b)
+	}
+}
+
+func TestDeployFTPProbeFailureLeavesSiteUntouched(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		server func(*testing.T) *httptest.Server
+		want   string
+	}{
+		{"kein CGI", func(t *testing.T) *httptest.Server {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }))
+			t.Cleanup(s.Close)
+			return s
+		}, "nicht als CGI"},
+		{"kein mod_rewrite", func(t *testing.T) *httptest.Server { return fakeApache(t, false) }, "mod_rewrite"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			os.WriteFile(filepath.Join(root, ".htaccess"), []byte("# WordPress\n"), 0o644)
+			os.WriteFile(filepath.Join(root, "index.php"), []byte("<?php // bestehende Website"), 0o644)
+			port, _ := startPyFTPD(t, root, false)
+			srv := c.server(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_, err := DeployFTP(ctx,
+				Artifact{Name: "kunde", BinaryPath: fakeBinary(t), GOOS: "linux", GOARCH: "amd64"},
+				Target{AllowPrivateNetworks: true, Method: MethodFTP, Host: "127.0.0.1", Port: port, User: "kunde", TLS: FTPPlain, AllowPlaintext: true, PublicURL: srv.URL},
+				Credentials{Password: "geheim"}, nil, &http.Client{Timeout: time.Second})
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "nichts verändert") {
+				t.Fatalf("erwartet Fehler mit %q, bekam %v", c.want, err)
+			}
+			entries, _ := os.ReadDir(root)
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			if strings.Join(names, ",") != ".htaccess,index.php" {
+				t.Fatalf("Webspace verändert: %v", names)
+			}
+			if b, _ := os.ReadFile(filepath.Join(root, ".htaccess")); string(b) != "# WordPress\n" {
+				t.Fatal(".htaccess verändert")
+			}
+		})
 	}
 }

@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyftpdlib pyopenssl
+      - name: go.sum erzeugen/prüfen (verifiziert gegen sum.golang.org)
+        run: |
+          cd factory-api && go mod tidy
+          git diff --exit-code go.mod || (echo "go.mod nicht aufgeräumt"; exit 1)
+      - name: gofmt
+        run: test -z "$(gofmt -l cms-template factory-api)"
+      - name: Tests
+        run: make test
+      - name: Keine CGO-Abhängigkeiten
+        run: make cgo
+      - name: Alle Modul-Kombinationen bauen + Negativtests
+        run: make matrix
+      - name: UI-Syntax
+        run: make ui
+
+  cross:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux/amd64, linux/arm64, darwin/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: scripts/matrix-build.sh ${{ matrix.target }}

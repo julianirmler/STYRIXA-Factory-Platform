@@ -7,7 +7,7 @@ Custom-CMS-Generator von **STYRIXA Digital Technology Studio**. Nutzer wählen M
 | Ordner | Inhalt | Stand |
 |---|---|---|
 | `factory-ui/` | React + Vite + Tailwind Configurator (Modulauswahl, Ziel-OS, Build) | UI-Mockup (`src/StyrixaFactoryConfigurator.jsx`), Build simuliert |
-| `factory-api/` | Go-Backend: Build-Worker und Deploy-Dienst (SSH / FTPS) | Deploy fertig + getestet, Build-Endpunkt geplant |
+| `factory-api/` | Go-Backend: Release-Katalog und Deploy-Dienst (SSH / FTPS) | Deploy fertig + getestet, Katalog geplant |
 | `cms-template/` | STYRIXA-CMS-Quellcode, Module per `//go:build mod_<name>` | Kern-Registry, Shop-Modul (Gerüst), Media-Platzhalter |
 
 ## Module
@@ -22,6 +22,10 @@ Custom-CMS-Generator von **STYRIXA Digital Technology Studio**. Nutzer wählen M
 | 06 | Design Management | `mod_design` | optional |
 | 07 | Theme Management | `mod_themes` | optional, benötigt `mod_design` |
 | 08 | Shop Management | `mod_shop` | optional, benötigt `mod_media` |
+
+## Builds
+
+Alle gültigen Modul-Kombinationen (aus `cms-template/modules.json`) werden bei jedem Release-Tag `v*` per GitHub Actions für 4 Plattformen vorgebaut, mit SHA-256 und ed25519 signiert und ans Release gehängt (`.github/workflows/release.yml`). Lokal: `make check`.
 
 ## Build-Regeln
 

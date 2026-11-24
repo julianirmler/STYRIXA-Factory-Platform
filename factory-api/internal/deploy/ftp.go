@@ -311,6 +311,9 @@ func (c *ftpClient) rename(from, to string) error {
 	return err
 }
 
+func (c *ftpClient) dele(path string) { _, _, _ = c.raw("DELE %s", path) }
+func (c *ftpClient) rmd(path string)  { _, _, _ = c.raw("RMD %s", path) }
+
 func (c *ftpClient) chmod(mode, path string) error {
 	_, err := c.cmd(200, "SITE CHMOD %s %s", mode, path)
 	return err
@@ -352,30 +355,66 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 		return root + "/" + name
 	}
 
-	// Datenordner + Schutz
-	c.mkdirAll(p(t.DataDir))
-	c.mkdirAll(p("themes"))
-	if err := c.stor(ctx, p(t.DataDir+"/.htaccess"), strings.NewReader(DenyAllHtaccess)); err != nil {
-		return nil, fmt.Errorf("Datenordner schützen: %w", err)
+	if httpClient == nil {
+		httpClient = guardedHTTPClient(t.AllowPrivateNetworks)
 	}
-	if c.exists(p(t.DataDir + "/styrixa.db")) {
-		log.emit("data", "ok", "Bestehende styrixa.db gefunden – bleibt unverändert")
-	}
+	rel := releaseID(time.Now())
 
-	// Binary hochladen (erst .part, dann umbenennen)
+	// 1. Hoster-Check in einem Prüfordner – die bestehende Website bleibt unberührt,
+	//    bis feststeht, dass CGI und mod_rewrite funktionieren.
 	f, err := os.Open(art.BinaryPath)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 	st, _ := f.Stat()
-	log.emit("upload", "info", "Lade styrixa.cgi hoch (%s) …", humanBytes(st.Size()))
-	if err := c.stor(ctx, p("styrixa.cgi.part"), f); err != nil {
+	probeName := "_styrixa-check-" + strings.ToLower(rel)
+	probe := p(probeName)
+	c.mkdirAll(probe)
+	cleanupProbe := func() {
+		for _, n := range []string{"styrixa.cgi", ".htaccess"} {
+			c.dele(probe + "/" + n)
+		}
+		c.rmd(probe)
+	}
+	log.emit("check", "info", "Hoster-Check: lade Programm in Prüfordner (%s) …", humanBytes(st.Size()))
+	if err := c.stor(ctx, probe+"/styrixa.cgi", f); err != nil {
+		cleanupProbe()
 		return nil, fmt.Errorf("Upload: %w", err)
 	}
-	if err := c.chmod("755", p("styrixa.cgi.part")); err != nil {
-		log.emit("upload", "warn", "SITE CHMOD nicht unterstützt (%v) – Rechte 755 für styrixa.cgi im Hoster-Panel setzen", err)
+	if err := c.chmod("755", probe+"/styrixa.cgi"); err != nil {
+		log.emit("check", "warn", "SITE CHMOD nicht unterstützt (%v) – Rechte 755 ggf. im Hoster-Panel setzen", err)
 	}
+	if err := c.stor(ctx, probe+"/.htaccess", strings.NewReader(ProbeHtaccess)); err != nil {
+		cleanupProbe()
+		return nil, err
+	}
+	base := strings.TrimRight(t.PublicURL, "/") + "/" + probeName
+	if err := probeHoster(ctx, httpClient, base); err != nil {
+		cleanupProbe()
+		log.emit("check", "error", "%v", err)
+		return nil, fmt.Errorf("Hoster-Check fehlgeschlagen – an der Website wurde nichts verändert: %w", err)
+	}
+	log.emit("check", "ok", "Hoster unterstützt CGI und mod_rewrite")
+
+	// 2. Datenordner + Schutz
+	c.mkdirAll(p(t.DataDir))
+	c.mkdirAll(p("themes"))
+	if err := c.stor(ctx, p(t.DataDir+"/.htaccess"), strings.NewReader(DenyAllHtaccess)); err != nil {
+		cleanupProbe()
+		return nil, fmt.Errorf("Datenordner schützen: %w", err)
+	}
+	if c.exists(p(t.DataDir + "/styrixa.db")) {
+		log.emit("data", "ok", "Bestehende styrixa.db gefunden – bleibt unverändert")
+	}
+
+	// 3. Geprüftes Programm übernehmen (kein zweiter Upload)
+	if err := c.rename(probe+"/styrixa.cgi", p("styrixa.cgi.part")); err != nil {
+		cleanupProbe()
+		return nil, fmt.Errorf("Übernehmen aus Prüfordner: %w", err)
+	}
+	cleanupProbe()
+	_ = c.chmod("755", p("styrixa.cgi.part")) // Rechte bleiben beim Umbenennen meist erhalten; sicherheitshalber erneut
 	if c.exists(p("styrixa.cgi")) {
 		_, _, _ = c.raw("DELE %s", p("styrixa.cgi.prev"))
 		_ = c.rename(p("styrixa.cgi"), p("styrixa.cgi.prev"))
@@ -385,8 +424,7 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	log.emit("upload", "ok", "styrixa.cgi aktiv")
 
-	// .htaccess sichern + schreiben
-	rel := releaseID(time.Now())
+	// 4. .htaccess sichern + schreiben
 	if c.exists(p(".htaccess")) {
 		old, err := c.retr(ctx, p(".htaccess"))
 		if err == nil && !bytes.Contains(old, []byte("# BEGIN STYRIXA")) {
@@ -402,10 +440,7 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	log.emit("htaccess", "ok", "CGI-Routing eingerichtet")
 
-	// Health-Check über die öffentliche URL
-	if httpClient == nil {
-		httpClient = guardedHTTPClient(t.AllowPrivateNetworks)
-	}
+	// 5. Health-Check über die öffentliche URL
 	url := strings.TrimRight(t.PublicURL, "/") + "/healthz"
 	log.emit("health", "info", "Health-Check %s …", url)
 	if err := waitHealthy(ctx, httpClient, url, 6, 2*time.Second); err != nil {
@@ -429,4 +464,26 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 			"Erster Aufruf: " + strings.TrimRight(t.PublicURL, "/") + "/install",
 		},
 	}, nil
+}
+
+// ProbeHtaccess: minimale Konfiguration für den Hoster-Check.
+const ProbeHtaccess = `Options +ExecCGI
+AddHandler cgi-script .cgi
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule ^ping$ styrixa.cgi/healthz [L]
+</IfModule>
+`
+
+// probeHoster prüft erst CGI direkt, dann über mod_rewrite – mit klarer Diagnose.
+func probeHoster(ctx context.Context, client *http.Client, base string) error {
+	direct := waitHealthy(ctx, client, base+"/styrixa.cgi/healthz", 3, time.Second)
+	if direct != nil {
+		return fmt.Errorf("das Programm wird nicht als CGI ausgeführt (Apache mit mod_cgi und .htaccess nötig; "+
+			"bei reinem nginx-Hosting bitte SSH-Deployment nutzen): %w", direct)
+	}
+	if err := waitHealthy(ctx, client, base+"/ping", 2, time.Second); err != nil {
+		return fmt.Errorf("CGI funktioniert, aber mod_rewrite fehlt oder ist in .htaccess nicht erlaubt (AllowOverride): %w", err)
+	}
+	return nil
 }

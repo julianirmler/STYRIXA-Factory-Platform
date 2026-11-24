@@ -1,0 +1,14 @@
+{
+  "_comment": "Einzige Quelle der Wahrheit für Module: CI-Matrix, Release-Builds und factory-ui lesen diese Datei.",
+  "modules": [
+    { "id": "dashboard", "nr": "01", "name": "Dashboard",            "required": true },
+    { "id": "content",   "nr": "02", "name": "Content Management",   "required": true },
+    { "id": "media",     "nr": "03", "name": "Media Management" },
+    { "id": "seo",       "nr": "04", "name": "SEO & GEO Management" },
+    { "id": "users",     "nr": "05", "name": "User Management" },
+    { "id": "design",    "nr": "06", "name": "Design Management" },
+    { "id": "themes",    "nr": "07", "name": "Theme Management",     "requires": ["design"] },
+    { "id": "shop",      "nr": "08", "name": "Shop Management",      "requires": ["media"] }
+  ],
+  "targets": ["linux/amd64", "linux/arm64", "darwin/arm64", "windows/amd64"]
+}
