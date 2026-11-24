@@ -1,0 +1,13 @@
+# Go
+/dist/
+*.test
+*.out
+styrixa
+styrixa.exe
+*.db
+*.db-*
+# Node
+node_modules/
+factory-ui/dist/
+# OS
+.DS_Store
