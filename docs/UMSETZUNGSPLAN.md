@@ -19,6 +19,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 - [x] Shop-Gerüst: Schema, DACH-Steuern mit Gültigkeit, Warenkorb-Berechnung, Zahlungs-Interface, Product-JSON-LD
 - [x] Deploy per SSH (Releases, systemd, Rollback) und FTPS (CGI-Modus), Fingerprint-Pinning, SSRF-Schutz, SSE-API
 - [x] CMS: CGI-Modus, `/healthz`, `--addr` / `STYRIXA_DATA`
+- [x] Stripe per HTTPS-API (Teil von 5.4): Checkout Session, signierte Webhooks, Idempotenz, Betragsprüfung, Erstattungen
 
 ---
 
@@ -108,6 +109,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 - [ ] **5.2** Katalog- und Produktseiten, JSON-LD, Grundpreis, 30-Tage-Tiefstpreis bei Rabatten
 - [ ] **5.3** Warenkorb (Cookie-Session) und Checkout (Gast oder Kundenkonto bei `mod_users`)
 - [ ] 🟣 **5.4** Stripe per HTTP-API (Karte, EPS, Klarna), signierte Webhooks, Idempotenz
+  - *Stand:* API-Client, Webhook-Prüfung, Statuslogik und SQL-Store fertig + getestet. **Offen:** Checkout-Handler (`POST /shop/kasse` → `Start`), Danke-Seite, Erstattung im Admin, Schlüssel aus Settings statt Umgebung (nach 1.2), Go-Integrationstest des SQL-Stores (nach 1.1)
 - [ ] **5.5** PayPal, Vorkasse, Zahlungsabgleich im Admin
 - [ ] **5.6** Rechnungs-PDF (reines Go), fortlaufende Nummern, Gutschriften, Bestellmails (SMTP)
 - [ ] **5.7** AGB-/Widerrufs-Verankerung, Pflicht-Checkbox, OSS-Schalter, Steuer-Admin

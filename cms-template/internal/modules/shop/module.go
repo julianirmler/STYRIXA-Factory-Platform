@@ -6,8 +6,11 @@ package shop
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/julianirmler/styrixa-cms/internal/core"
 )
@@ -15,7 +18,10 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-type module struct{ d core.Deps }
+type module struct {
+	d     core.Deps
+	store PaymentStore
+}
 
 func (*module) ID() string         { return "shop" }
 func (*module) Requires() []string { return []string{"media"} }
@@ -35,6 +41,10 @@ func (*module) AdminNav() []core.NavItem {
 
 func (m *module) Mount(mux *http.ServeMux, d core.Deps) {
 	m.d = d
+	if d.DB != nil {
+		m.store = SQLPaymentStore{DB: d.DB}
+	}
+	configureProviders()
 	// Admin (Auth-Middleware des Kerns umschließt /admin/*)
 	mux.HandleFunc("GET /admin/shop/orders", todo("Bestellübersicht"))
 	mux.HandleFunc("GET /admin/shop/orders/{number}", todo("Bestelldetail"))
@@ -58,13 +68,52 @@ func (m *module) webhook(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	ref, status, err := p.Webhook(r)
-	if err != nil {
+	u, err := p.Webhook(r)
+	switch {
+	case errors.Is(err, ErrNoWebhook):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		// Ungültige Signatur o. Ä.: keine Details nach außen
+		log.Printf("shop: webhook %s abgelehnt: %v", p.ID(), err)
 		http.Error(w, "invalid webhook", http.StatusBadRequest)
 		return
 	}
-	_, _ = ref, status // TODO: shop_orders.payment_status aktualisieren + Event loggen
-	w.WriteHeader(http.StatusNoContent)
+	if m.store == nil {
+		http.Error(w, "not ready", http.StatusServiceUnavailable) // Anbieter wiederholt später
+		return
+	}
+	out, err := m.store.ApplyPayment(r.Context(), *u)
+	switch {
+	case errors.Is(err, ErrOrderNotFound):
+		// z. B. Ereignis eines anderen Systems auf demselben Stripe-Konto – quittieren, nicht wiederholen lassen
+		log.Printf("shop: webhook %s %s: Bestellung %q unbekannt", p.ID(), u.EventType, u.OrderNumber)
+	case err != nil:
+		log.Printf("shop: webhook %s %s: %v", p.ID(), u.EventType, err)
+		http.Error(w, "retry", http.StatusInternalServerError) // Anbieter wiederholt
+		return
+	case out == OutcomeFlagged:
+		log.Printf("shop: webhook %s %s für %s zur Prüfung markiert", p.ID(), u.EventType, u.OrderNumber)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// configureProviders aktiviert Zahlungsanbieter, deren Zugangsdaten vorhanden sind.
+// Bis der Settings-Store steht (Session 1.2), kommen sie aus der Umgebung.
+func configureProviders() {
+	sk, wh := os.Getenv("STYRIXA_STRIPE_SECRET_KEY"), os.Getenv("STYRIXA_STRIPE_WEBHOOK_SECRET")
+	if sk == "" && wh == "" {
+		return
+	}
+	st, err := NewStripe(StripeConfig{SecretKey: sk, WebhookSecret: wh, APIVersion: os.Getenv("STYRIXA_STRIPE_API_VERSION")})
+	if err != nil {
+		log.Printf("shop: Stripe nicht aktiviert: %v", err)
+		return
+	}
+	registerProvider(st)
+	if st.TestMode() {
+		log.Printf("shop: Stripe aktiv (TESTMODUS)")
+	}
 }
 
 func todo(what string) http.HandlerFunc {
