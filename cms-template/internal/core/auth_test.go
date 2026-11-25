@@ -46,8 +46,9 @@ type authEnv struct {
 
 func (e *authEnv) advance(d time.Duration) { e.mutex.Lock(); e.now = e.now.Add(d); e.mutex.Unlock() }
 
-// newAuthEnv: frische DB, ein Admin, Handler-Kette wie in main.go.
-func newAuthEnv(t *testing.T) *authEnv {
+// newAuthEnv: frische DB, ein Admin, Handler-Kette wie in main.go – optional
+// mit Modulen (werden mit Admin-Shell in Deps gemountet).
+func newAuthEnv(t *testing.T, mods ...Module) *authEnv {
 	t.Helper()
 	db := openTestDB(t, t.TempDir())
 	ctx := context.Background()
@@ -68,6 +69,14 @@ func newAuthEnv(t *testing.T) *authEnv {
 		Now: func() time.Time { e.mutex.Lock(); defer e.mutex.Unlock(); return e.now }}
 	mux := http.NewServeMux()
 	e.a.Mount(mux)
+	admin, err := NewAdmin(db, st, mods)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin.Mount(mux)
+	for _, m := range mods {
+		m.Mount(mux, Deps{DB: db, Settings: st, Admin: admin})
+	}
 	mux.HandleFunc("GET /admin/test", func(w http.ResponseWriter, r *http.Request) {
 		id, _ := CurrentUser(r.Context())
 		fmt.Fprintf(w, "user=%d", id)

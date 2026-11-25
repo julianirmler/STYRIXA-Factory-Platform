@@ -78,12 +78,3 @@ button{margin-top:1.5rem;padding:.6rem 1.2rem;font:inherit;font-weight:600;borde
 <p>Alle bisherigen Anmeldungen wurden beendet.</p>
 <p><a href="/admin/login">Jetzt anmelden</a></p>
 {{template "foot"}}{{end}}
-
-{{define "home"}}{{template "head"}}
-<h1>Admin</h1>
-<p>Angemeldet als <strong>{{.Email}}</strong>.</p>
-<form method="post" action="/admin/logout">
-	<input type="hidden" name="csrf" value="{{.CSRF}}">
-	<button type="submit">Abmelden</button>
-</form>
-{{template "foot"}}{{end}}

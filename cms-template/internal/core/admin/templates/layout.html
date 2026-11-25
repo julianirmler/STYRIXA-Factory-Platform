@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="htmx-config" content="{{.HtmxConfig}}">
+<title>{{.Title}} · {{.SiteTitle}}</title>
+<link rel="stylesheet" href="{{asset "admin.css"}}">
+<script src="{{asset "htmx-2.0.11.min.js"}}" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<header class="top">
+	<a class="site" href="/admin">{{.SiteTitle}}</a>
+	<span class="who">{{.Email}}</span>
+	<form method="post" action="/admin/logout">
+		<input type="hidden" name="csrf" value="{{.CSRF}}">
+		<button type="submit" class="link">Abmelden</button>
+	</form>
+</header>
+<div class="shell">
+<nav class="side" aria-label="Admin-Navigation">
+	<ul>
+	{{- range .Nav}}
+		<li><a href="{{.Path}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a></li>
+	{{- end}}
+	</ul>
+</nav>
+<main>
+<h1>{{.Title}}</h1>
+{{template "content" .}}
+</main>
+</div>
+</body>
+</html>

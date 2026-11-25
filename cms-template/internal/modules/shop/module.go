@@ -18,6 +18,11 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// Admin-Templates nur im Shop-Paket: ohne mod_shop nicht im Binary (ADR-002).
+//
+//go:embed templates/*.html
+var templates embed.FS
+
 type module struct {
 	d     core.Deps
 	store PaymentStore
@@ -27,6 +32,11 @@ func (*module) ID() string         { return "shop" }
 func (*module) Requires() []string { return []string{"media"} }
 func (*module) Migrations() fs.FS {
 	sub, _ := fs.Sub(migrations, "migrations")
+	return sub
+}
+
+func (*module) Templates() fs.FS {
+	sub, _ := fs.Sub(templates, "templates")
 	return sub
 }
 
@@ -45,13 +55,13 @@ func (m *module) Mount(mux *http.ServeMux, d core.Deps) {
 		m.store = SQLPaymentStore{DB: d.DB}
 	}
 	// Admin (Auth-Middleware des Kerns umschließt /admin/*)
-	mux.HandleFunc("GET /admin/shop/orders", todo("Bestellübersicht"))
-	mux.HandleFunc("GET /admin/shop/orders/{number}", todo("Bestelldetail"))
-	mux.HandleFunc("POST /admin/shop/orders/{number}/status", todo("Status ändern"))
-	mux.HandleFunc("GET /admin/shop/products", todo("Produktliste"))
-	mux.HandleFunc("POST /admin/shop/products", todo("Produkt anlegen"))
-	mux.HandleFunc("GET /admin/shop/coupons", todo("Gutscheine"))
-	mux.HandleFunc("GET /admin/shop/settings", todo("Shop-Einstellungen"))
+	mux.HandleFunc("GET /admin/shop/orders", m.adminTodo("Bestellungen"))
+	mux.HandleFunc("GET /admin/shop/orders/{number}", m.adminTodo("Bestelldetail"))
+	mux.HandleFunc("POST /admin/shop/orders/{number}/status", m.adminTodo("Status ändern"))
+	mux.HandleFunc("GET /admin/shop/products", m.adminTodo("Produkte"))
+	mux.HandleFunc("POST /admin/shop/products", m.adminTodo("Produkt anlegen"))
+	mux.HandleFunc("GET /admin/shop/coupons", m.adminTodo("Gutscheine"))
+	mux.HandleFunc("GET /admin/shop/settings", m.adminTodo("Einstellungen"))
 
 	// Öffentlich
 	mux.HandleFunc("GET /shop", todo("Katalog"))
@@ -132,6 +142,19 @@ func stripeFromSettings(ctx context.Context, s core.Settings) (*Stripe, error) {
 		return nil, err
 	}
 	return NewStripe(StripeConfig{SecretKey: sk, WebhookSecret: wh, APIVersion: ver})
+}
+
+// adminTodo rendert eine Platzhalterseite im Admin-Layout (Shop-Funktionen
+// folgen in Phase 5).
+func (m *module) adminTodo(what string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if m.d.Admin == nil {
+			todo(what)(w, r)
+			return
+		}
+		m.d.Admin.Render(w, r, http.StatusOK, core.AdminPage{
+			Title: "Shop · " + what, Template: "shop/placeholder.html", Data: struct{ What string }{what}})
+	}
 }
 
 func todo(what string) http.HandlerFunc {

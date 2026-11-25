@@ -146,8 +146,8 @@ func CSRFToken(ctx context.Context) string {
 
 // ---- Routen und Middleware ----
 
-// Mount registriert Login, Logout, Reset und eine vorläufige Admin-Startseite
-// (die Admin-Shell folgt in 1.4).
+// Mount registriert Login, Logout und Passwort-Reset. Die Admin-Startseite
+// liefert die Admin-Shell (Admin.Mount).
 func (a *Auth) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+PathLogin, a.loginForm)
 	mux.HandleFunc("POST "+PathLogin, a.login)
@@ -156,14 +156,14 @@ func (a *Auth) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+PathForgot, a.forgot)
 	mux.HandleFunc("GET "+PathReset, a.resetForm)
 	mux.HandleFunc("POST "+PathReset, a.reset)
-	mux.HandleFunc("GET /admin", a.home)
-	mux.HandleFunc("GET /admin/{$}", a.home)
 }
 
 func isAdminPath(p string) bool { return p == "/admin" || strings.HasPrefix(p, "/admin/") }
 
+// isPublicAdminPath: Login-Seiten und die statischen Dateien der Admin-Shell
+// (htmx, CSS – nichts Geheimes, darf öffentlich gecacht werden).
 func isPublicAdminPath(p string) bool {
-	return p == PathLogin || p == PathForgot || p == PathReset
+	return p == PathLogin || p == PathForgot || p == PathReset || strings.HasPrefix(p, pathAdminStatic)
 }
 
 // Require umschließt /admin/*: ohne gültige Session → Login; bei Nicht-GET
@@ -394,18 +394,6 @@ func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setCookie(w, r, "", -1)
 	http.Redirect(w, r, PathLogin, http.StatusSeeOther)
-}
-
-// home ist die vorläufige Admin-Startseite bis zur Admin-Shell (1.4).
-func (a *Auth) home(w http.ResponseWriter, r *http.Request) {
-	id, _ := CurrentUser(r.Context())
-	var email string
-	if err := a.DB.QueryRowContext(r.Context(), `SELECT email FROM core_users WHERE id = ?`, id).Scan(&email); err != nil {
-		slog.Error("auth: Benutzer nicht lesbar", "err", err)
-		http.Error(w, msgInternal, http.StatusInternalServerError)
-		return
-	}
-	a.render(w, http.StatusOK, "home", authPage{Email: email, CSRF: CSRFToken(r.Context())})
 }
 
 // ---- Passwort ----

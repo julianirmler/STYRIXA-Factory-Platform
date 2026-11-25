@@ -73,8 +73,16 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `last_seen` wird höchstens einmal pro Minute geschrieben (spart im CGI-Modus einen Schreibzugriff pro Anfrage).
     - Passwortänderung gibt es vorerst nur über den Reset (`Auth.SetPassword` löscht alle Sessions und Reset-Tokens); ein Formular dafür kommt mit der Admin-Shell.
     - Offen für 1.6: Die Reset-Mail wird synchron in der Anfrage gesendet (keine Goroutine im CGI-Modus) – die Antwortzeit kann verraten, ob es das Konto gibt. Abhilfe wäre Versand als Lazy-Job.
-- [ ] **1.4** Admin-Shell mit `html/template` + htmx (ADR-002): Layout, Navigation aus `AdminNav()`, Modul-Templates per `embed` im Modulpaket
+- [x] **1.4** Admin-Shell mit `html/template` + htmx (ADR-002): Layout, Navigation aus `AdminNav()`, Modul-Templates per `embed` im Modulpaket
   - *Abnahme:* Template eines Moduls nur im Binary, wenn sein Build-Tag gesetzt ist (Test)
+  - *Erledigt 2026-11-25, Abweichungen/Entscheidungen:*
+    - Abnahmetest `cmd/styrixa/isolation_test.go` baut echte Binaries (ohne Tags, `mod_media`, `mod_media mod_shop`) und sucht den Marker aus `shop/templates/placeholder.html`; läuft über `go test ./...` und damit in `make check` und CI (kein eigenes Make-Ziel nötig).
+    - htmx 2.0.11 per `npm pack` (Registry-Integrität geprüft), byte-identisch als `internal/core/admin/static/htmx-2.0.11.min.js`; Version, Lizenz und SHA-256 in `internal/core/admin/VENDOR.md` statt als Kommentar in der Datei (sonst wäre die Prüfsumme nicht mehr die des Originals).
+    - Statische Dateien unter `/admin/static/<name>.<hash>.<ext>` (Inhalts-Hash zusätzlich zur Version, gilt auch für `admin.css`), `immutable`, **ohne Login** abrufbar (nichts Geheimes).
+    - Admin-CSP schon jetzt: `default-src 'self'` ohne Inline-Skripte/-Styles; dafür htmx-Konfiguration `includeIndicatorStyles:false, allowEval:false, allowScriptTags:false`, Indikator-Styles in `admin.css`. CSRF-Token für htmx per `hx-headers` am `<body>`.
+    - Module rendern über `Deps.Admin` (`core.AdminRenderer`); optionales Interface `core.AdminTemplates`. Jedes Modul-Template wird in eine eigene Kopie des Layouts geparst (Name `<modul-id>/<pfad>`) – gleichnamige Hilfs-Templates verschiedener Module kollidieren nicht. `core.AdminPlaceholder` für noch leere Seiten (Media nutzt ihn für `/admin/media`).
+    - Die vorläufige Startseite aus 1.3 ist ersetzt (`GET /admin` = Übersicht der Shell). Shop-Admin-Routen rendern eine Platzhalterseite im Layout (auch die POST-Routen, Status 200).
+    - Offen: Formular „Passwort ändern“ im Admin (in 1.3 für die Shell vorgemerkt) ist noch nicht gebaut.
 - [ ] **1.5** Öffentliches Rendering: Routing, Templates, Theme-Fallback, Caching-Header (`ETag`), 404/500
   - *Abnahme:* Startseite im Server- und CGI-Modus identisch
 - [ ] **1.6** Lazy-Jobs + Cron-Endpunkt (ADR-005), Logging, `/healthz` mit DB-Check

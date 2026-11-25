@@ -10,10 +10,12 @@ import (
 
 type module struct{}
 
-func (module) ID() string                      { return "media" }
-func (module) Requires() []string              { return nil }
-func (module) Migrations() fs.FS               { return nil } // noch keine Tabellen
-func (module) Mount(*http.ServeMux, core.Deps) {}
+func (module) ID() string         { return "media" }
+func (module) Requires() []string { return nil }
+func (module) Migrations() fs.FS  { return nil } // noch keine Tabellen
+func (module) Mount(mux *http.ServeMux, d core.Deps) {
+	mux.HandleFunc("GET /admin/media", core.AdminPlaceholder(d, "Medien"))
+}
 func (module) AdminNav() []core.NavItem {
 	return []core.NavItem{{Label: "Medien", Path: "/admin/media", Icon: "image", Order: 30}}
 }

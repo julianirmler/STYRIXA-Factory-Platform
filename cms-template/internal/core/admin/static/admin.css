@@ -1,0 +1,51 @@
+/* STYRIXA Admin – eine kleine, handgeschriebene Datei (ADR-002). */
+:root {
+	--bg: #f4f5f7; --panel: #fff; --text: #1c1f24; --muted: #5a606b;
+	--line: #dde0e5; --accent: #1c4fd8; --accent-text: #fff; --danger: #b00020;
+	--radius: 6px; --side: 14rem;
+	color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+	:root { --bg: #15171a; --panel: #22252a; --text: #e6e8eb; --muted: #a0a6b0;
+		--line: #353941; --accent: #8ab4ff; --accent-text: #0d1117; --danger: #ff8a8a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+a { color: var(--accent); }
+h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+
+.top { display: flex; align-items: center; gap: 1rem; padding: .6rem 1.25rem;
+	background: var(--panel); border-bottom: 1px solid var(--line); }
+.top .site { font-weight: 700; color: var(--text); text-decoration: none; margin-right: auto; }
+.top .who { color: var(--muted); font-size: .9rem; }
+.top form { margin: 0; }
+
+.shell { display: flex; min-height: calc(100vh - 3rem); }
+.side { width: var(--side); flex: none; padding: 1rem .75rem; border-right: 1px solid var(--line); background: var(--panel); }
+.side ul { list-style: none; margin: 0; padding: 0; }
+.side a { display: block; padding: .4rem .6rem; border-radius: var(--radius); color: var(--text); text-decoration: none; }
+.side a:hover { background: var(--bg); }
+.side a[aria-current="page"] { background: var(--accent); color: var(--accent-text); }
+main { flex: 1; min-width: 0; padding: 1.5rem 2rem; }
+
+@media (max-width: 48rem) {
+	.shell { display: block; }
+	.side { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+	.side ul { display: flex; flex-wrap: wrap; gap: .25rem; }
+	main { padding: 1rem; }
+}
+
+.hint { color: var(--muted); font-size: .9rem; }
+.notice { padding: 1rem 1.25rem; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.err { color: var(--danger); }
+
+label { display: block; margin-top: 1rem; font-weight: 600; }
+input, select, textarea { width: 100%; max-width: 32rem; padding: .5rem; font: inherit; color: inherit;
+	background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+button { padding: .55rem 1.1rem; font: inherit; font-weight: 600; border: 0; border-radius: var(--radius);
+	background: var(--accent); color: var(--accent-text); cursor: pointer; }
+button.link { padding: 0; background: none; color: var(--accent); font-weight: 400; text-decoration: underline; }
+
+/* htmx-Ladeanzeige (Inline-Styles von htmx sind per Konfiguration aus, CSP) */
+.htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator { opacity: 1; }

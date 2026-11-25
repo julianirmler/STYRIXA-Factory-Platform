@@ -22,7 +22,8 @@ type NavItem struct {
 // Deps sind die Abhängigkeiten, die der Kern jedem Modul übergibt.
 type Deps struct {
 	DB       *sql.DB
-	Settings Settings // Einstellungen aus core_settings; nil nur in Tests
+	Settings Settings      // Einstellungen aus core_settings; nil nur in Tests
+	Admin    AdminRenderer // Admin-Layout für Modulseiten; nil nur in Tests
 }
 
 // Module ist der Vertrag zwischen Kern und Modul.

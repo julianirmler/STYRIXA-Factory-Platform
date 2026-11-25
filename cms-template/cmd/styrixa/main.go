@@ -73,7 +73,12 @@ func main() {
 	installer.Mount(mux)
 	auth := &core.Auth{DB: db, Settings: settings, Mail: core.SMTPMailer{Settings: settings}}
 	auth.Mount(mux)
-	deps := core.Deps{DB: db, Settings: settings}
+	admin, err := core.NewAdmin(db, settings, mods)
+	if err != nil {
+		log.Fatal(err)
+	}
+	admin.Mount(mux)
+	deps := core.Deps{DB: db, Settings: settings, Admin: admin}
 	for _, m := range mods {
 		m.Mount(mux, deps)
 	}
