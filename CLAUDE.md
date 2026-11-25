@@ -6,7 +6,7 @@ Projektregeln für Claude Code. Vor jeder Session lesen, zusammen mit `docs/adr/
 
 ## Aktuelle Phase
 
-@docs/phasen/PHASE-1.md
+@docs/phasen/PHASE-2.md
 
 ## Was das ist
 
