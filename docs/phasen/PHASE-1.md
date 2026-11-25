@@ -122,7 +122,7 @@ Vorhanden – benutzen, nicht neu bauen:
 
 - [ ] 1.1 Migrationen idempotent, Zwei-Prozess-Test grün, `SQLPaymentStore`-Integrationstest
 - [x] 1.2 `/install` funktioniert, zweiter Aufruf 404, Stripe-Schlüssel aus Settings
-- [ ] 1.3 Tests gegen Fixation, CSRF, Brute-Force grün
+- [x] 1.3 Tests gegen Fixation, CSRF, Brute-Force grün
 - [ ] 1.4 Build-Tag-Isolierung der Admin-Templates per Test belegt, in `make check`
 - [ ] 1.5 Startseite Server = CGI (Test)
 - [ ] 1.6 Job im CGI-Modus, `/healthz` mit DB-Check, RAM < 20 MB gemessen

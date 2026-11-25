@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,6 +140,7 @@ func (in *Installer) RequireInstalled(next http.Handler) http.Handler {
 
 type installForm struct {
 	Code, Title, Region, GISA, Email string
+	siteURL                          string // aus der Anfrage, für Links in Mails
 	password, password2              string
 }
 
@@ -177,6 +179,8 @@ func (in *Installer) post(w http.ResponseWriter, r *http.Request) {
 		Email:     strings.TrimSpace(r.PostFormValue("email")),
 		password:  r.PostFormValue("password"),
 		password2: r.PostFormValue("password2"),
+		// /install ist durch den Einmal-Code geschützt – Host dieser Anfrage ist vertrauenswürdig.
+		siteURL: (&url.URL{Scheme: requestScheme(r), Host: r.Host}).String(),
 	}
 	errs := f.validate()
 	if !in.codeMatches(f.Code) {
@@ -192,11 +196,7 @@ func (in *Installer) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cost := in.BcryptCost
-	if cost == 0 {
-		cost = defaultBcryptCost
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(f.password), cost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(f.password), bcryptCost(in.BcryptCost))
 	if err != nil {
 		slog.Error("install: bcrypt", "err", err)
 		http.Error(w, "Interner Fehler – bitte erneut versuchen.", http.StatusInternalServerError)
@@ -234,15 +234,24 @@ func (f installForm) validate() map[string]string {
 	if a, err := mail.ParseAddress(f.Email); err != nil || a.Name != "" || a.Address != f.Email || len(f.Email) > 254 {
 		errs["email"] = "Bitte eine gültige E-Mail-Adresse angeben."
 	}
-	switch {
-	case utf8.RuneCountInString(f.password) < minPasswordRunes:
-		errs["password"] = fmt.Sprintf("Das Passwort muss mindestens %d Zeichen lang sein.", minPasswordRunes)
-	case len(f.password) > maxPasswordBytes:
-		errs["password"] = fmt.Sprintf("Das Passwort darf höchstens %d Bytes lang sein.", maxPasswordBytes)
-	case f.password != f.password2:
-		errs["password2"] = "Die Passwörter stimmen nicht überein."
+	if field, msg := validatePassword(f.password, f.password2); field != "" {
+		errs[field] = msg
 	}
 	return errs
+}
+
+// validatePassword prüft die Passwortregeln (Installation und Reset). Liefert
+// das betroffene Feld („password“ oder „password2“) und die Meldung.
+func validatePassword(pw, pw2 string) (field, msg string) {
+	switch {
+	case utf8.RuneCountInString(pw) < minPasswordRunes:
+		return "password", fmt.Sprintf("Das Passwort muss mindestens %d Zeichen lang sein.", minPasswordRunes)
+	case len(pw) > maxPasswordBytes:
+		return "password", fmt.Sprintf("Das Passwort darf höchstens %d Bytes lang sein.", maxPasswordBytes)
+	case pw != pw2:
+		return "password2", "Die Passwörter stimmen nicht überein."
+	}
+	return "", ""
 }
 
 // codeMatches vergleicht in konstanter Zeit mit dem Inhalt der Code-Datei.
@@ -292,6 +301,7 @@ func (in *Installer) install(ctx context.Context, f installForm, hash string) (e
 		{KeySiteTitle, f.Title},
 		{KeySiteRegion, f.Region},
 		{KeySiteGISA, gisa},
+		{KeySiteURL, f.siteURL},
 		{KeyInstalledAt, time.Now().UTC().Format(time.RFC3339)},
 	} {
 		if err = setSetting(ctx, tx, kv[0], kv[1]); err != nil {

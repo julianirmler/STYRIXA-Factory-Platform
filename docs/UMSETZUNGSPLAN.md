@@ -60,8 +60,19 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `POST /install` zusätzlich hinter `http.CrossOriginProtection`; Formular mit Passwort-Wiederholung; Passwort max. 72 Bytes (bcrypt-Grenze). GISA-Feld nur bei de-AT sichtbar (CSS `:has`, kein JS), für andere Regionen ignoriert.
     - Vor der Installation: GET → 303 auf `/install`, andere Methoden → 503 „noch nicht eingerichtet“.
     - `cms-template/go.mod`: `golang.org/x/crypto` v0.59.0, `golang.org/x/sys` v0.49.0 → v0.50.0
-- [ ] 🟣 **1.3** Login, Sessions (HttpOnly, Secure, SameSite=Lax), CSRF-Token, Login-Rate-Limit in der DB (CGI-tauglich), Passwort-Reset per Mail (`net/smtp`)
+- [x] 🟣 **1.3** Login, Sessions (HttpOnly, Secure, SameSite=Lax), CSRF-Token, Login-Rate-Limit in der DB (CGI-tauglich), Passwort-Reset per Mail (`net/smtp`)
   - *Abnahme:* Tests gegen Session-Fixation, CSRF, Brute-Force
+  - *Erledigt 2026-11-25, Abweichungen/Entscheidungen:*
+    - **URLs** (Nutzerentscheidung): `/admin/login`, `POST /admin/logout`, `/admin/passwort-vergessen`, `/admin/passwort-neu?token=…`; dazu eine vorläufige Admin-Startseite `GET /admin` mit Logout (wird in 1.4 durch die Admin-Shell ersetzt).
+    - **Client-IP** (Nutzerentscheidung): letzter Eintrag in `X-Forwarded-For` nur, wenn die Verbindung von Loopback kommt (Caddy/nginx des SSH-Deploys), sonst `RemoteAddr` bzw. `REMOTE_ADDR` (CGI). `core.ClientIP`.
+    - **Reset-Link** (Nutzerentscheidung): neues Setting `site.url`, von `/install` aus der (durch den Einmal-Code geschützten) Anfrage gespeichert – nie aus dem Host-Header der Reset-Anfrage. Ohne `site.url` wird keine Mail gesendet, Antwort bleibt gleich.
+    - SMTP-Settings: `mail.smtp.host`, `mail.smtp.port` (Standard 587), `mail.smtp.user`, `mail.smtp.password`, `mail.from`. STARTTLS ist Pflicht (sonst kein Versand, kein AUTH), Zertifikat wird geprüft. Eingabe im Admin folgt mit den Admin-Settings.
+    - `http.CrossOriginProtection` jetzt global um den ganzen Handler (lässt GET und Anfragen ohne `Origin`/`Sec-Fetch-Site` wie den Stripe-Webhook durch), damit auch das Login-Formular gegen Login-CSRF geschützt ist.
+    - Rate-Limit: Versuch wird **vor** der bcrypt-Prüfung in einer `IMMEDIATE`-Transaktion gezählt, damit parallele Anfragen das Limit nicht überholen (Test mit 20 parallelen Versuchen). Bei Erfolg werden die Fehlversuche der E-Mail und der eigene IP-Eintrag gelöscht. Reset-Anfragen haben eigene Zähler (gleiche Grenzen, gegen Mail-Flut).
+    - Dummy-Hash für unbekannte E-Mails ist eine Konstante mit Kosten 12 (gleiche Rechenzeit wie echte Konten).
+    - `last_seen` wird höchstens einmal pro Minute geschrieben (spart im CGI-Modus einen Schreibzugriff pro Anfrage).
+    - Passwortänderung gibt es vorerst nur über den Reset (`Auth.SetPassword` löscht alle Sessions und Reset-Tokens); ein Formular dafür kommt mit der Admin-Shell.
+    - Offen für 1.6: Die Reset-Mail wird synchron in der Anfrage gesendet (keine Goroutine im CGI-Modus) – die Antwortzeit kann verraten, ob es das Konto gibt. Abhilfe wäre Versand als Lazy-Job.
 - [ ] **1.4** Admin-Shell mit `html/template` + htmx (ADR-002): Layout, Navigation aus `AdminNav()`, Modul-Templates per `embed` im Modulpaket
   - *Abnahme:* Template eines Moduls nur im Binary, wenn sein Build-Tag gesetzt ist (Test)
 - [ ] **1.5** Öffentliches Rendering: Routing, Templates, Theme-Fallback, Caching-Header (`ETag`), 404/500

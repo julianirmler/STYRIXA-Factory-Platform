@@ -6,8 +6,8 @@
 //
 // Datenordner: STYRIXA_DATA (Standard ./data) – enthält styrixa.db (SQLite, WAL).
 // Migrationen laufen bei jedem Start, im CGI-Modus also bei jeder Anfrage.
-// Weitere Umgebungsvariablen: nur STYRIXA_ADDR. Alles andere (z. B. Stripe-Schlüssel)
-// steht in den Settings (core_settings).
+// Weitere Umgebungsvariablen: nur STYRIXA_ADDR. Alles andere (z. B. Stripe-Schlüssel,
+// SMTP-Zugang für den Passwort-Reset) steht in den Settings (core_settings).
 package main
 
 import (
@@ -71,11 +71,16 @@ func main() {
 	}
 	mux.HandleFunc("GET /healthz", health)
 	installer.Mount(mux)
+	auth := &core.Auth{DB: db, Settings: settings, Mail: core.SMTPMailer{Settings: settings}}
+	auth.Mount(mux)
 	deps := core.Deps{DB: db, Settings: settings}
 	for _, m := range mods {
 		m.Mount(mux, deps)
 	}
-	handler := installer.RequireInstalled(mux)
+	// Von innen nach außen: Login + CSRF-Token für /admin/*, Cross-Origin-Schutz
+	// für alle Nicht-GET-Anfragen (Anfragen ohne Origin/Sec-Fetch-Site wie der
+	// Stripe-Webhook kommen durch), Umleitung auf /install vor der Einrichtung.
+	handler := installer.RequireInstalled(http.NewCrossOriginProtection().Handler(auth.Require(mux)))
 
 	if cgiMode {
 		// Hoster-Check der Factory ruft …/styrixa.cgi/healthz in einem Prüfordner auf:

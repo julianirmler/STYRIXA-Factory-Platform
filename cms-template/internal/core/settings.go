@@ -16,6 +16,13 @@ const (
 	KeySiteTitle  = "site.title"
 	KeySiteRegion = "site.region" // de-AT | de-DE | de-CH
 	KeySiteGISA   = "site.gisa"   // GISA-Zahl (nur de-AT), optional
+	KeySiteURL    = "site.url"    // z. B. https://example.at – Basis für Links in Mails (von /install gesetzt)
+
+	KeySMTPHost     = "mail.smtp.host"
+	KeySMTPPort     = "mail.smtp.port" // Standard 587 (STARTTLS)
+	KeySMTPUser     = "mail.smtp.user"
+	KeySMTPPassword = "mail.smtp.password" // Geheimnis: nie loggen, im Admin maskieren
+	KeyMailFrom     = "mail.from"          // Absenderadresse
 
 	KeyStripeSecretKey     = "shop.stripe.secret_key"     // Geheimnis: nie loggen, im Admin maskieren
 	KeyStripeWebhookSecret = "shop.stripe.webhook_secret" // Geheimnis

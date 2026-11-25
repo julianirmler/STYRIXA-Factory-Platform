@@ -1,0 +1,89 @@
+{{define "head"}}<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>STYRIXA Admin</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f4f5f7;color:#1c1f24}
+main{max-width:26rem;margin:3rem auto;padding:1.5rem 2rem;background:#fff;border-radius:8px;box-shadow:0 1px 3px #0002}
+h1{font-size:1.4rem;margin-top:0}
+label{display:block;margin-top:1rem;font-weight:600}
+input{box-sizing:border-box;width:100%;padding:.5rem;font:inherit;border:1px solid #b8bcc4;border-radius:4px}
+.hint{font-size:.85rem;color:#5a606b;margin:.2rem 0 0}
+.err{color:#b00020;font-size:.9rem;margin:.6rem 0 0}
+button{margin-top:1.5rem;padding:.6rem 1.2rem;font:inherit;font-weight:600;border:0;border-radius:4px;background:#1c4fd8;color:#fff;cursor:pointer}
+@media (prefers-color-scheme:dark){body{background:#15171a;color:#e6e8eb}main{background:#22252a}input{background:#15171a;color:inherit;border-color:#4a4f57}.hint{color:#a0a6b0}.err{color:#ff8a8a}a{color:#8ab4ff}}
+</style>
+</head>
+<body><main>{{end}}
+
+{{define "foot"}}</main></body></html>{{end}}
+
+{{define "login"}}{{template "head"}}
+<h1>Anmelden</h1>
+<form method="post" action="/admin/login" novalidate>
+	<label for="email">E-Mail</label>
+	<input id="email" name="email" type="email" value="{{.Email}}" autocomplete="username" required autofocus>
+	<label for="password">Passwort</label>
+	<input id="password" name="password" type="password" autocomplete="current-password" required>
+	{{with .Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+	<button type="submit">Anmelden</button>
+</form>
+<p class="hint"><a href="/admin/passwort-vergessen">Passwort vergessen?</a></p>
+{{template "foot"}}{{end}}
+
+{{define "forgot"}}{{template "head"}}
+<h1>Passwort vergessen</h1>
+<p>Wir schicken dir einen Link, mit dem du ein neues Passwort festlegen kannst.</p>
+<form method="post" action="/admin/passwort-vergessen" novalidate>
+	<label for="email">E-Mail</label>
+	<input id="email" name="email" type="email" value="{{.Email}}" autocomplete="username" required autofocus>
+	{{with .Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+	<button type="submit">Link anfordern</button>
+</form>
+<p class="hint"><a href="/admin/login">Zurück zur Anmeldung</a></p>
+{{template "foot"}}{{end}}
+
+{{define "forgot-sent"}}{{template "head"}}
+<h1>Bitte Postfach prüfen</h1>
+<p>Falls es ein Konto mit dieser E-Mail-Adresse gibt, haben wir einen Link geschickt. Er ist 30 Minuten gültig.</p>
+<p class="hint"><a href="/admin/login">Zurück zur Anmeldung</a></p>
+{{template "foot"}}{{end}}
+
+{{define "reset"}}{{template "head"}}
+<h1>Neues Passwort</h1>
+<form method="post" action="/admin/passwort-neu" novalidate>
+	<input type="hidden" name="token" value="{{.Token}}">
+	<label for="password">Neues Passwort</label>
+	<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required autofocus>
+	<p class="hint">Mindestens 12 Zeichen.</p>
+	{{with .Errors.password}}<p class="err">{{.}}</p>{{end}}
+	<label for="password2">Passwort wiederholen</label>
+	<input id="password2" name="password2" type="password" autocomplete="new-password" required>
+	{{with .Errors.password2}}<p class="err">{{.}}</p>{{end}}
+	<button type="submit">Passwort speichern</button>
+</form>
+{{template "foot"}}{{end}}
+
+{{define "reset-invalid"}}{{template "head"}}
+<h1>Link ungültig</h1>
+<p>Der Link ist abgelaufen oder wurde bereits verwendet.</p>
+<p><a href="/admin/passwort-vergessen">Neuen Link anfordern</a></p>
+{{template "foot"}}{{end}}
+
+{{define "reset-done"}}{{template "head"}}
+<h1>Passwort geändert</h1>
+<p>Alle bisherigen Anmeldungen wurden beendet.</p>
+<p><a href="/admin/login">Jetzt anmelden</a></p>
+{{template "foot"}}{{end}}
+
+{{define "home"}}{{template "head"}}
+<h1>Admin</h1>
+<p>Angemeldet als <strong>{{.Email}}</strong>.</p>
+<form method="post" action="/admin/logout">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<button type="submit">Abmelden</button>
+</form>
+{{template "foot"}}{{end}}

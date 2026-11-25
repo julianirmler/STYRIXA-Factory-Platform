@@ -103,6 +103,9 @@ func TestInstallFlow(t *testing.T) {
 	if all[KeySiteTitle] != "Tischlerei Muster" || all[KeySiteRegion] != "de-AT" || all[KeySiteGISA] != "12345678" || all[KeyInstalledAt] == "" {
 		t.Fatalf("Settings: %v", all)
 	}
+	if all[KeySiteURL] != "http://example.com" { // httptest-Host, ohne TLS
+		t.Fatalf("site.url: %q", all[KeySiteURL])
+	}
 	var email, hash string
 	if err := in.DB.QueryRow(`SELECT email, password_hash FROM core_users`).Scan(&email, &hash); err != nil {
 		t.Fatal(err)

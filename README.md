@@ -62,7 +62,7 @@ Das CMS erkennt den CGI-Modus automatisch (`GATEWAY_INTERFACE`) und bietet `/hea
 
 Erstinstallation: `/install` (Seitentitel, Region, GISA-Zahl, Admin-Konto) verlangt einen **Einmal-Code**. Beim SSH-/FTP-Deploy legt die Factory ihn als `install-code` im Datenordner ab und zeigt ihn an; bei der Download-Variante erzeugt das CMS die Datei selbst (Server-Modus meldet den Pfad beim Start). Nach der Installation wird die Datei gelöscht und `/install` antwortet mit 404.
 
-Umgebungsvariablen des CMS: nur `STYRIXA_DATA` (Datenordner) und `STYRIXA_ADDR` (Listen-Adresse). Stripe-Schlüssel stehen seit Session 1.2 in den Settings (`core_settings`, Schlüssel `shop.stripe.*`); `STYRIXA_STRIPE_SECRET_KEY`, `STYRIXA_STRIPE_WEBHOOK_SECRET` und `STYRIXA_STRIPE_API_VERSION` gibt es nicht mehr. Eingabe im Admin folgt mit den Shop-Einstellungen (Phase 5).
+Umgebungsvariablen des CMS: nur `STYRIXA_DATA` (Datenordner) und `STYRIXA_ADDR` (Listen-Adresse). Stripe-Schlüssel stehen seit Session 1.2 in den Settings (`core_settings`, Schlüssel `shop.stripe.*`); `STYRIXA_STRIPE_SECRET_KEY`, `STYRIXA_STRIPE_WEBHOOK_SECRET` und `STYRIXA_STRIPE_API_VERSION` gibt es nicht mehr. Eingabe im Admin folgt mit den Shop-Einstellungen (Phase 5). Der SMTP-Zugang für den Passwort-Reset steht ebenfalls in den Settings (`mail.smtp.host`, `mail.smtp.port`, `mail.smtp.user`, `mail.smtp.password`, `mail.from`; nur mit STARTTLS); die Basis-URL für Links in Mails (`site.url`) setzt `/install`.
 
 ```bash
 cd factory-api
