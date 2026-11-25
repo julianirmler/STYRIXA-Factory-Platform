@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"log"
 	"log/slog"
@@ -52,9 +53,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	settings := core.SettingsStore{DB: db}
-	installer := &core.Installer{DB: db, DataDir: dataDir}
 	if !cgiMode {
+		settings := core.SettingsStore{DB: db}
 		// Download-Variante ohne Factory-Deploy: Code-Datei gleich beim Start anlegen.
 		// Nur den Pfad melden – der Code selbst ist ein Geheimnis.
 		if ok, err := core.Installed(context.Background(), settings); err == nil && !ok {
@@ -64,35 +64,17 @@ func main() {
 		}
 	}
 
-	mux := http.NewServeMux()
-	health := func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write([]byte("ok"))
-	}
-	mux.HandleFunc("GET /healthz", health)
-	installer.Mount(mux)
-	auth := &core.Auth{DB: db, Settings: settings, Mail: core.SMTPMailer{Settings: settings}}
-	auth.Mount(mux)
-	admin, err := core.NewAdmin(db, settings, mods)
+	handler, err := newHandler(db, dataDir, mods)
 	if err != nil {
 		log.Fatal(err)
 	}
-	admin.Mount(mux)
-	deps := core.Deps{DB: db, Settings: settings, Admin: admin}
-	for _, m := range mods {
-		m.Mount(mux, deps)
-	}
-	// Von innen nach außen: Login + CSRF-Token für /admin/*, Cross-Origin-Schutz
-	// für alle Nicht-GET-Anfragen (Anfragen ohne Origin/Sec-Fetch-Site wie der
-	// Stripe-Webhook kommen durch), Umleitung auf /install vor der Einrichtung.
-	handler := installer.RequireInstalled(http.NewCrossOriginProtection().Handler(auth.Require(mux)))
 
 	if cgiMode {
 		// Hoster-Check der Factory ruft …/styrixa.cgi/healthz in einem Prüfordner auf:
 		// dann ist nur PATH_INFO aussagekräftig, nicht der volle Pfad.
 		h := handler
 		if os.Getenv("PATH_INFO") == "/healthz" {
-			h = http.HandlerFunc(health)
+			h = core.SecurityHeaders(http.HandlerFunc(health))
 		}
 		if err := cgi.Serve(h); err != nil {
 			log.Fatal(err)
@@ -103,6 +85,44 @@ func main() {
 	srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	log.Printf("STYRIXA CMS lauscht auf %s (%d Module, Daten: %s)", *addr, len(mods), dataDir)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// health antwortet auf den Hoster-Check der Factory (erwartet genau „ok“).
+func health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write([]byte("ok"))
+}
+
+// newHandler baut den kompletten Handler – identisch für Server- und CGI-Modus.
+func newHandler(db *sql.DB, dataDir string, mods []core.Module) (http.Handler, error) {
+	settings := core.SettingsStore{DB: db}
+	installer := &core.Installer{DB: db, DataDir: dataDir}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", health)
+	installer.Mount(mux)
+	auth := &core.Auth{DB: db, Settings: settings, Mail: core.SMTPMailer{Settings: settings}}
+	auth.Mount(mux)
+	admin, err := core.NewAdmin(db, settings, mods)
+	if err != nil {
+		return nil, err
+	}
+	admin.Mount(mux)
+	public, err := core.NewPublic(settings, mods)
+	if err != nil {
+		return nil, err
+	}
+	public.Mount(mux) // Startseite + 404 für alles, was keine andere Route trifft
+	deps := core.Deps{DB: db, Settings: settings, Admin: admin}
+	for _, m := range mods {
+		m.Mount(mux, deps)
+	}
+	// Von innen nach außen: Login + CSRF-Token für /admin/*, Cross-Origin-Schutz
+	// für alle Nicht-GET-Anfragen (Anfragen ohne Origin/Sec-Fetch-Site wie der
+	// Stripe-Webhook kommen durch), Umleitung auf /install vor der Einrichtung,
+	// Sicherheits-Header für jede Antwort, 500-Seite statt Absturz bei Panics.
+	h := installer.RequireInstalled(http.NewCrossOriginProtection().Handler(auth.Require(mux)))
+	return public.Recover(core.SecurityHeaders(h)), nil
 }
 
 func envOr(k, def string) string {

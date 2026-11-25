@@ -83,8 +83,16 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - Module rendern über `Deps.Admin` (`core.AdminRenderer`); optionales Interface `core.AdminTemplates`. Jedes Modul-Template wird in eine eigene Kopie des Layouts geparst (Name `<modul-id>/<pfad>`) – gleichnamige Hilfs-Templates verschiedener Module kollidieren nicht. `core.AdminPlaceholder` für noch leere Seiten (Media nutzt ihn für `/admin/media`).
     - Die vorläufige Startseite aus 1.3 ist ersetzt (`GET /admin` = Übersicht der Shell). Shop-Admin-Routen rendern eine Platzhalterseite im Layout (auch die POST-Routen, Status 200).
     - Offen: Formular „Passwort ändern“ im Admin (in 1.3 für die Shell vorgemerkt) ist noch nicht gebaut.
-- [ ] **1.5** Öffentliches Rendering: Routing, Templates, Theme-Fallback, Caching-Header (`ETag`), 404/500
+- [x] **1.5** Öffentliches Rendering: Routing, Templates, Theme-Fallback, Caching-Header (`ETag`), 404/500
   - *Abnahme:* Startseite im Server- und CGI-Modus identisch
+  - *Erledigt 2026-11-25, Abweichungen/Entscheidungen:*
+    - Abnahmetest `cmd/styrixa/public_test.go`: `main.go` baut den Handler jetzt in `newHandler` (gleich für beide Modi); Server = `httptest.NewServer(newHandler(…))`, CGI = echtes Binary über `net/http/cgi.Handler`. Verglichen werden Status, Header (Content-Type/-Length, Cache-Control, ETag, Sicherheits-Header, Location) und Körper für Startseite (GET, HEAD, 304), 404, `/admin` ohne Login und `/healthz`.
+    - Der Test fand einen echten Unterschied: Die CGI-Abkürzung für `PATH_INFO=/healthz` lief an allen Middlewares vorbei (keine Sicherheits-Header) – behoben.
+    - **Theme-Schnittstelle** `core.PublicTheme` (`PublicTemplates() fs.FS`) mit `layout.html`, `home.html`, `404.html`, `500.html`; ein Theme darf eine Teilmenge liefern, der Rest kommt aus `internal/core/public/templates/`. Höchstens ein Modul im Binary darf ein Theme liefern (sonst Startfehler) – für 4.5/4.6 ggf. neu entscheiden, wenn Design und Themes zusammenspielen. Daten-Vertrag: `core.PublicView` (Lang, SiteTitle, Title, Status, Data).
+    - ETag = erste 8 Byte von SHA-256 des Körpers (16 Hex), nur bei 200; `If-None-Match` mit schwachem Vergleich, Listen und `*`. HTML: `no-cache`, 500: `no-store`, `/admin/*`: `no-store` (Middleware-Standard; statische Admin-Dateien überschreiben mit `immutable`).
+    - `core.SecurityHeaders` (nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, Admin-CSP für `/admin/*`) und `Public.Recover` (Panic → 500-Seite, Stack nur ins Log) umschließen den ganzen Handler. Login/Install behalten ihre strengere `no-referrer`-Policy und eigene CSP (Inline-Styles).
+    - Alles, was keine Route trifft, bekommt die Theme-404 (auch falsche Methode statt 405); unter `/admin/*` schlichter Text ohne Theme. 500 bei Template-Fehler zeigt keine Teilausgabe; scheitert auch die 500-Seite, kommt Klartext.
+    - Für Phase 5 offen: Module bekommen noch keinen Zugriff auf die Theme-404 (`Deps.Public` o. ä.), z. B. für unbekannte Produkte.
 - [ ] **1.6** Lazy-Jobs + Cron-Endpunkt (ADR-005), Logging, `/healthz` mit DB-Check
   - *Abnahme:* Job läuft im CGI-Modus ohne Hintergrundprozess
 
