@@ -5,6 +5,8 @@
 set -eu
 target=${1:-$(go env GOOS)/$(go env GOARCH)}
 out=${2:-}
+# Ausgabeordner absolut machen, bevor nach cms-template gewechselt wird
+if [ -n "$out" ]; then mkdir -p "$out"; out=$(cd "$out" && pwd); fi
 goos=${target%/*}; goarch=${target#*/}
 cd "$(dirname "$0")/../cms-template"
 ext=""; [ "$goos" = windows ] && ext=".exe"
