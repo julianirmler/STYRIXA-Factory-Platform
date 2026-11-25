@@ -33,7 +33,12 @@ jobs:
         run: make cgo
       - name: Alle Modul-Kombinationen bauen + Negativtests
         run: make matrix
-      - name: UI-Syntax
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: factory-ui/package-lock.json
+      - name: UI bauen und testen
         run: make ui
 
   cross:

@@ -42,11 +42,14 @@ cd factory-api
 go mod tidy                # einmalig / nach neuen Abhängigkeiten
 go test ./...              # FTP-Tests brauchen: pip install pyftpdlib pyopenssl
 
-# UI-Syntaxcheck (bis factory-ui ein Vite-Projekt ist)
-npx esbuild factory-ui/src/StyrixaFactoryConfigurator.jsx --loader:.jsx=jsx > /dev/null
+# UI (Entwicklung, mit laufender factory-api auf 127.0.0.1:8090)
+cd factory-ui && npm ci && npm run dev
+
+# UI gebaut über die factory-api ausliefern
+cd factory-ui && npm run build && cd ../factory-api && go run ./cmd/factory-api --ui ../factory-ui/dist
 ```
 
-Vor jedem Commit: **`make check`** (gofmt, Tests, CGO-Prüfung, Build aller gültigen Kombinationen, Negativtests für fehlende Abhängigkeiten, UI-Syntax). Die CI macht dasselbe zusätzlich für alle 4 Plattformen.
+Vor jedem Commit: **`make check`** (gofmt, Tests, CGO-Prüfung, Build aller gültigen Kombinationen, Negativtests für fehlende Abhängigkeiten, UI-Build + `node --test`). Die CI macht dasselbe zusätzlich für alle 4 Plattformen.
 
 ## Konventionen
 

@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  LayoutDashboard,
-  FileText,
-  Image as ImageIcon,
-  Search,
-  Users,
-  Palette,
-  Package,
   Lock,
   Check,
   Cpu,
@@ -14,173 +7,46 @@ import {
   Monitor,
   Laptop,
   Rocket,
-  Terminal,
   Download,
   Loader2,
   Database,
   ShieldCheck,
-  Copy,
-  RotateCcw,
   Info,
   Hash,
   Boxes,
-  ShoppingCart,
   UploadCloud,
   KeyRound,
   Globe,
   AlertTriangle,
   Fingerprint,
+  RotateCcw,
   X,
 } from "lucide-react";
+import { getCatalog, selectPackage, streamDeploy as apiStreamDeploy } from "./lib/api.js";
+import { normalize, toggle as toggleSelection } from "./lib/selection.js";
+import { formatSize, moduleMeta, targetMeta } from "./lib/moduleMeta.js";
 
 /* ------------------------------------------------------------------ */
-/*  STYRIXA Factory – Configurator UI (Mockup)                         */
-/*  React + Tailwind CSS + lucide-react                                 */
-/*  Der Build-Ablauf ist hier simuliert. Später kommt er per            */
-/*  POST /api/builds + SSE-Log-Stream aus der factory-api.              */
+/*  STYRIXA Factory – Configurator                                     */
+/*  Module, Abhängigkeiten und Plattformen kommen aus GET /api/catalog */
+/*  (signierte modules.json). Die Factory baut nicht selbst (ADR-004): */
+/*  jede Auswahl wird einem vorgebauten, signierten Paket zugeordnet.  */
 /* ------------------------------------------------------------------ */
 
-const MODULES = [
-  {
-    id: "dashboard",
-    nr: "01",
-    tag: "mod_dashboard",
-    name: "Dashboard",
-    icon: LayoutDashboard,
-    required: true,
-    sizeKb: 420,
-    desc: "Besucher-Statistiken, Systemstatus und Schnellzugriffe.",
-    features: ["Besucher-Stats", "Status", "Quick Actions"],
-  },
-  {
-    id: "content",
-    nr: "02",
-    tag: "mod_content",
-    name: "Content Management",
-    icon: FileText,
-    required: true,
-    sizeKb: 1180,
-    desc: "Drag-and-Drop-Blöcke, HTML Studio (Raw HTML/CSS), Auto-Save.",
-    features: ["Block-Editor", "HTML Studio", "Auto-Save"],
-  },
-  {
-    id: "media",
-    nr: "03",
-    tag: "mod_media",
-    name: "Media Management",
-    icon: ImageIcon,
-    sizeKb: 1650,
-    desc: "WebP/AVIF-Auto-Optimierung, Ordnerstruktur, Alt-Texte.",
-    features: ["WebP/AVIF", "Ordner", "Alt-Texte"],
-  },
-  {
-    id: "seo",
-    nr: "04",
-    tag: "mod_seo",
-    name: "SEO & GEO Management",
-    icon: Search,
-    sizeKb: 540,
-    desc: "Meta, Sitemap, robots.txt, 301-Redirects, Schema.org JSON-LD, Answer-First.",
-    features: ["Sitemap", "301", "JSON-LD"],
-  },
-  {
-    id: "users",
-    nr: "05",
-    tag: "mod_users",
-    name: "User Management",
-    icon: Users,
-    sizeKb: 760,
-    desc: "RBAC (Admin, Redakteur, Autor, Kunde), 2FA (TOTP), Activity-Log.",
-    features: ["RBAC", "2FA", "Activity-Log"],
-  },
-  {
-    id: "design",
-    nr: "06",
-    tag: "mod_design",
-    name: "Design Management",
-    icon: Palette,
-    sizeKb: 380,
-    desc: "Globale Theme-Tokens, Farben, Fonts und Templates.",
-    features: ["Tokens", "Fonts", "Templates"],
-  },
-  {
-    id: "themes",
-    nr: "07",
-    tag: "mod_themes",
-    name: "Theme Management",
-    icon: Package,
-    sizeKb: 610,
-    requires: ["design"],
-    desc: "ZIP-Upload (archive/zip), theme.json-Validierung, Entpacken nach ./themes/<id>/, 1-Klick-Aktivierung.",
-    features: ["ZIP-Upload", "theme.json", "1-Klick"],
-  },
-  {
-    id: "shop",
-    nr: "08",
-    tag: "mod_shop",
-    name: "Shop Management",
-    icon: ShoppingCart,
-    sizeKb: 1420,
-    requires: ["media"],
-    desc: "Produkte & Varianten, Lager, Bestellungen, DACH-Steuern, Versand, Gutscheine, Rechnungen, Product-Schema.org.",
-    features: ["Produkte", "Bestellungen", "USt AT/DE/CH", "Stripe/EPS", "Rechnungen"],
-  },
-];
+const TARGET_ICONS = { "linux/amd64": Server, "linux/arm64": Cpu, darwin: Laptop, windows: Monitor };
+const targetIcon = (t) => TARGET_ICONS[t] || TARGET_ICONS[t.split("/")[0]] || Server;
 
-const TARGETS = [
-  { id: "linux-amd64", goos: "linux", goarch: "amd64", label: "Linux", sub: "x86_64 · Server/VPS", icon: Server },
-  { id: "linux-arm64", goos: "linux", goarch: "arm64", label: "Linux ARM", sub: "arm64 · Graviton/Pi", icon: Cpu },
-  { id: "darwin-arm64", goos: "darwin", goarch: "arm64", label: "macOS", sub: "Apple Silicon", icon: Laptop },
-  { id: "windows-amd64", goos: "windows", goarch: "amd64", label: "Windows", sub: "x86_64 · .exe", icon: Monitor },
-];
-
-// Auslieferungswege nach dem Build
+// Auslieferungswege
 const DELIVERY = [
-  {
-    id: "download",
-    label: "Download",
-    sub: ".tar.gz selbst installieren",
-    icon: Download,
-  },
-  {
-    id: "ssh",
-    label: "Server per SSH",
-    sub: "VPS, Managed Server, Hosting mit SSH",
-    icon: Server,
-    badge: "Empfohlen",
-  },
-  {
-    id: "ftp",
-    label: "Webspace per FTP(S)",
-    sub: "Shared Hosting mit Apache (CGI-Modus)",
-    icon: Globe,
-  },
+  { id: "download", label: "Download", sub: ".tar.gz selbst installieren", icon: Download },
+  { id: "ssh", label: "Server per SSH", sub: "VPS, Managed Server, Hosting mit SSH", icon: Server, badge: "Empfohlen" },
+  { id: "ftp", label: "Webspace per FTP(S)", sub: "Shared Hosting mit Apache (CGI-Modus)", icon: Globe },
 ];
 
-// true = Deploy wird im Browser simuliert; false = echte factory-api (SSE)
+// true = Deploy wird im Browser simuliert (bis Session 2.3); false = echte factory-api (SSE)
 const MOCK_DEPLOY = true;
 
-const BASE_SIZE_KB = 7800; // Go-Runtime + net/http + modernc.org/sqlite + Installer
-
-const BUILD_STEPS = [
-  { key: "validate", label: "Config validieren" },
-  { key: "workspace", label: "Workspace vorbereiten" },
-  { key: "deps", label: "Module & Abhängigkeiten auflösen" },
-  { key: "compile", label: "go build (CGO_ENABLED=0)" },
-  { key: "package", label: "tar.gz paketieren" },
-  { key: "checksum", label: "SHA-256 & Signatur" },
-];
-
-function fmtSize(kb) {
-  return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
-}
-
-function randHex(n) {
-  const c = "0123456789abcdef";
-  let s = "";
-  for (let i = 0; i < n; i++) s += c[Math.floor(Math.random() * 16)];
-  return s;
-}
+const SELECT_DEBOUNCE_MS = 150;
 
 /* ------------------------------ Logo ------------------------------ */
 function StyrixaMark() {
@@ -197,13 +63,19 @@ function StyrixaMark() {
 
 /* --------------------------- Hauptkomponente --------------------------- */
 export default function StyrixaFactoryConfigurator() {
-  const [selected, setSelected] = useState(
-    () => new Set(MODULES.filter((m) => m.required || ["seo", "media"].includes(m.id)).map((m) => m.id))
-  );
-  const [target, setTarget] = useState("linux-amd64");
-  const [siteName, setSiteName] = useState("styrixa-cms");
-  const [region, setRegion] = useState("de-AT");
+  // Katalog
+  const [catalog, setCatalog] = useState(null); // {release, modules, targets}
+  const [catalogError, setCatalogError] = useState(null);
+  const [catalogTry, setCatalogTry] = useState(0);
+
+  const [selected, setSelected] = useState(() => new Set(["seo", "media"]));
+  const [target, setTarget] = useState("linux/amd64");
   const [notice, setNotice] = useState(null);
+
+  // Paket zur Auswahl
+  const [pkg, setPkg] = useState(null);
+  const [pkgLoading, setPkgLoading] = useState(false);
+  const [pkgError, setPkgError] = useState(null);
 
   // Auslieferung / Deploy
   const [delivery, setDelivery] = useState("download");
@@ -227,87 +99,80 @@ export default function StyrixaFactoryConfigurator() {
   const [deployResult, setDeployResult] = useState(null);
   const deployTimers = useRef([]);
 
-  // Build-State
-  const [phase, setPhase] = useState("idle"); // idle | running | done
-  const [stepIdx, setStepIdx] = useState(-1);
-  const [logs, setLogs] = useState([]);
-  const [result, setResult] = useState(null);
-  const [copied, setCopied] = useState(false);
-  const logRef = useRef(null);
-  const timers = useRef([]);
-
-  const tgt = TARGETS.find((t) => t.id === target);
-  const activeModules = MODULES.filter((m) => selected.has(m.id));
-  const tags = activeModules.map((m) => m.tag);
-  const estKb = BASE_SIZE_KB + activeModules.reduce((a, m) => a + m.sizeKb, 0);
-  const binName = `styrixa${tgt.goos === "windows" ? ".exe" : ""}`;
-  const slug = siteName.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-") || "styrixa-cms";
-  const artifact = `${slug}_${tgt.goos}_${tgt.goarch}.tar.gz`;
-
-  const buildCmd = useMemo(
-    () =>
-      `CGO_ENABLED=0 GOOS=${tgt.goos} GOARCH=${tgt.goarch} \\\n` +
-      `  go build -trimpath -ldflags "-s -w" \\\n` +
-      `  -tags "${tags.join(" ")}" \\\n` +
-      `  -o dist/${binName} ./cmd/styrixa`,
-    [tgt, tags.join(","), binName]
-  );
-
-  const buildConfig = useMemo(
-    () => ({
-      name: slug,
-      target: { goos: tgt.goos, goarch: tgt.goarch },
-      modules: activeModules.map((m) => m.id),
-      defaults: { region },
-    }),
-    [slug, tgt, activeModules.length, region]
-  );
-
+  /* ---- Katalog laden ---- */
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logs]);
+    const ac = new AbortController();
+    setCatalogError(null);
+    getCatalog(ac.signal)
+      .then((c) => {
+        setCatalog(c);
+        setSelected((s) => normalize(s, c.modules));
+        setTarget((t) => (c.targets.includes(t) ? t : c.targets[0]));
+      })
+      .catch((e) => {
+        if (e.name === "AbortError") return;
+        setCatalogError(e.status === 503 ? "Katalog derzeit nicht verfügbar" : e.message);
+      });
+    return () => ac.abort();
+  }, [catalogTry]);
 
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  /* ---- Paket zur Auswahl (entprellt, vorherige Anfrage abbrechen) ---- */
+  useEffect(() => {
+    if (!catalog || !target) return;
+    const ac = new AbortController();
+    setPkgLoading(true);
+    setPkgError(null);
+    const t = setTimeout(() => {
+      selectPackage(selected, target, ac.signal)
+        .then((p) => {
+          setPkg(p);
+          setPkgLoading(false);
+        })
+        .catch((e) => {
+          if (e.name === "AbortError") return;
+          setPkg(null);
+          setPkgError(e.message);
+          setPkgLoading(false);
+        });
+    }, SELECT_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
+  }, [catalog, selected, target]);
 
-  const locked = phase === "running";
+  useEffect(() => () => deployTimers.current.forEach(clearTimeout), []);
+
+  // Neues Paket → laufendes Deploy-Ergebnis gehört nicht mehr dazu
+  useEffect(() => {
+    resetDeploy();
+    setConfirmedFp("");
+  }, [pkg?.id]);
+
+  const modules = catalog?.modules ?? [];
+  const targets = catalog?.targets ?? [];
+  const activeModules = modules.filter((m) => selected.has(m.id));
+  const [goos, goarch] = target.split("/");
+  const binName = `styrixa${goos === "windows" ? ".exe" : ""}`;
+  const depLocked = deployPhase === "running";
 
   function toggle(mod) {
-    if (mod.required || locked) return;
-    const next = new Set(selected);
-    if (next.has(mod.id)) {
-      // Abhängige Module mit abwählen
-      const dependents = MODULES.filter((m) => m.requires?.includes(mod.id) && next.has(m.id));
-      next.delete(mod.id);
-      dependents.forEach((d) => next.delete(d.id));
-      if (dependents.length)
-        setNotice(`${dependents.map((d) => d.name).join(", ")} wurde mit abgewählt (benötigt ${mod.name}).`);
-      else setNotice(null);
-    } else {
-      next.add(mod.id);
-      const missing = (mod.requires || []).filter((r) => !next.has(r));
-      missing.forEach((r) => next.add(r));
-      if (missing.length)
-        setNotice(
-          `${missing.map((r) => MODULES.find((m) => m.id === r).name).join(", ")} automatisch aktiviert (benötigt von ${mod.name}).`
-        );
-      else setNotice(null);
-    }
-    setSelected(next);
-    if (phase === "done") resetBuild();
+    if (mod.required || depLocked) return;
+    const r = toggleSelection(selected, mod.id, modules);
+    setSelected(r.selected);
+    setNotice(r.notice);
   }
 
   function selectAll() {
-    if (locked) return;
-    setSelected(new Set(MODULES.map((m) => m.id)));
+    if (depLocked) return;
+    setSelected(normalize(new Set(modules.map((m) => m.id)), modules));
     setNotice(null);
-    if (phase === "done") resetBuild();
   }
 
   function selectMinimal() {
-    if (locked) return;
-    setSelected(new Set(MODULES.filter((m) => m.required).map((m) => m.id)));
+    if (depLocked) return;
+    setSelected(normalize(new Set(), modules));
     setNotice(null);
-    if (phase === "done") resetBuild();
   }
 
   function resetDeploy() {
@@ -319,70 +184,7 @@ export default function StyrixaFactoryConfigurator() {
     setDeployResult(null);
   }
 
-  function resetBuild() {
-    resetDeploy();
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    setPhase("idle");
-    setStepIdx(-1);
-    setLogs([]);
-    setResult(null);
-  }
-
-  function startBuild() {
-    resetBuild();
-    setPhase("running");
-    const id = `bld_${randHex(8)}`;
-    const t0 = new Date();
-    const script = [
-      [0, 300, `▸ POST /api/builds  →  ${id}`],
-      [0, 250, `  config: ${JSON.stringify(buildConfig)}`],
-      [0, 350, `  ✓ Schema ok · ${tags.length} Module · Ziel ${tgt.goos}/${tgt.goarch}`],
-      [1, 400, `▸ workspace: /var/factory/jobs/${id}`],
-      [1, 300, `  cp -r cms-template/ → src/ (read-only snapshot)`],
-      [1, 300, `  GOFLAGS=-mod=vendor · GOCACHE shared`],
-      [2, 350, `▸ build-tags: ${tags.join(" ")}`],
-      ...activeModules
-        .filter((m) => m.requires)
-        .map((m) => [2, 250, `  dep: ${m.tag} → ${m.requires.map((r) => "mod_" + r).join(", ")} ✓`]),
-      [2, 300, `  ausgeschlossen: ${MODULES.filter((m) => !selected.has(m.id)).map((m) => m.tag).join(" ") || "—"}`],
-      [3, 300, `▸ CGO_ENABLED=0 GOOS=${tgt.goos} GOARCH=${tgt.goarch}`],
-      [3, 450, `  compiling modernc.org/sqlite (pure Go) …`],
-      [3, 400, `  compiling internal/installer (/install wizard) …`],
-      ...activeModules.map((m) => [3, 280, `  compiling internal/modules/${m.id} …`]),
-      [3, 500, `  embed: web/admin, web/install, migrations/*.sql`],
-      [3, 300, `  ✓ dist/${binName} (${fmtSize(estKb)})`],
-      [4, 400, `▸ tar -czf ${artifact}`],
-      [4, 250, `  + ${binName}  + README.md  + LICENSE  + themes/.keep`],
-      [5, 350, `▸ sha256: ${randHex(64)}`],
-      [5, 300, `  ✓ Build abgeschlossen in ${(4 + activeModules.length * 0.6).toFixed(1)} s`],
-    ];
-
-    let acc = 0;
-    script.forEach(([step, delay, line], i) => {
-      acc += delay;
-      timers.current.push(
-        setTimeout(() => {
-          setStepIdx(step);
-          setLogs((l) => [...l, line]);
-          if (i === script.length - 1) {
-            setStepIdx(BUILD_STEPS.length);
-            setPhase("done");
-            setResult({
-              id,
-              file: artifact,
-              size: fmtSize(Math.round(estKb * 0.42)),
-              bin: fmtSize(estKb),
-              at: t0.toLocaleTimeString("de-AT"),
-            });
-          }
-        }, acc)
-      );
-    });
-  }
-
   const setD = (k) => (e) => setDep((d) => ({ ...d, [k]: e.target.value }));
-  const depLocked = deployPhase === "running";
 
   const deployErrors = useMemo(() => {
     if (delivery === "download") return [];
@@ -392,9 +194,9 @@ export default function StyrixaFactoryConfigurator() {
     if (dep.auth === "password" && !dep.password) e.push("Passwort fehlt");
     if (delivery === "ssh" && dep.auth === "key" && !dep.privateKey.includes("PRIVATE KEY")) e.push("Privater Schlüssel fehlt");
     if (delivery === "ftp" && !/^https?:\/\/[^/]+/.test(dep.publicUrl)) e.push("Website-URL für den Health-Check fehlt");
-    if (delivery === "ftp" && tgt.goos !== "linux") e.push("Webspace läuft auf Linux – Zielplattform Linux wählen");
+    if (delivery === "ftp" && goos !== "linux") e.push("Webspace läuft auf Linux – Zielplattform Linux wählen");
     return e;
-  }, [delivery, dep, tgt]);
+  }, [delivery, dep, goos]);
 
   const pushLog = (level, msg) =>
     setDeployLogs((l) => [...l, { level, msg, t: new Date().toLocaleTimeString("de-AT") }]);
@@ -414,39 +216,33 @@ export default function StyrixaFactoryConfigurator() {
   }
 
   // Echte Anbindung: POST /api/packages/{id}/deploy → Server-Sent Events
-  async function streamDeploy(fp) {
-    const res = await fetch(`/api/packages/${result.id}/deploy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  function streamDeploy(fp) {
+    return apiStreamDeploy(
+      pkg.id,
+      {
         target: deployTarget(fp),
         password: dep.auth === "password" ? dep.password : "",
         privateKey: dep.auth === "key" ? dep.privateKey : "",
-      }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const chunk = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        const ev = /^event: (.*)$/m.exec(chunk)?.[1];
-        const data = JSON.parse(/^data: (.*)$/m.exec(chunk)?.[1] || "{}");
-        if (ev === "log") pushLog(data.level, data.msg);
-        if (ev === "identity") { setIdentity(data); setDeployPhase("confirm"); }
-        if (ev === "result") { setDeployResult(data); setDeployPhase("done"); }
-        if (ev === "error") { pushLog("error", data.message); setDeployPhase("error"); }
+      },
+      {
+        log: (d) => pushLog(d.level, d.msg),
+        identity: (d) => {
+          setIdentity(d);
+          setDeployPhase("confirm");
+        },
+        result: (d) => {
+          setDeployResult(d);
+          setDeployPhase("done");
+        },
+        error: (d) => {
+          pushLog("error", d.message);
+          setDeployPhase("error");
+        },
       }
-    }
+    );
   }
 
-  // Simulation für den Mockup
+  // Simulation bis Session 2.3 – nutzt schon die echte Paket-ID
   function mockDeploy(fp) {
     const isSSH = delivery === "ssh";
     const fakeFp = isSSH ? "SHA256:q7nF2c9xVb1kPz0R8mWlT4aYd6sHgE3uJiK5oNpQrS0" : "SHA256:Zk3P8sWq1LmN7bVx2cR5tY9uI0oPaS4dF6gH8jK1lE0";
@@ -454,28 +250,30 @@ export default function StyrixaFactoryConfigurator() {
     const steps = [[300, "info", `Verbinde mit ${dep.host}${isSSH ? ":" + (dep.port || 22) : ":" + (dep.port || 21) + " (FTPS)"} als ${dep.user} …`]];
     if (!fp) {
       steps.forEach(([d, l, m]) => deployTimers.current.push(setTimeout(() => pushLog(l, m), d)));
-      deployTimers.current.push(setTimeout(() => {
-        setIdentity({ kind, fingerprint: fakeFp, mismatch: false });
-        setDeployPhase("confirm");
-      }, 900));
+      deployTimers.current.push(
+        setTimeout(() => {
+          setIdentity({ kind, fingerprint: fakeFp, mismatch: false });
+          setDeployPhase("confirm");
+        }, 900)
+      );
       return;
     }
     const rel = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
     const more = isSSH
       ? [
           [400, "ok", `Verbunden, Host-Key ${fp.slice(0, 18)}… bestätigt`],
-          [400, "ok", `Server-Plattform ${tgt.goos}/${tgt.goarch} passt`],
-          [700, "info", `Lade Binary hoch (${fmtSize(estKb)}) …`],
+          [400, "ok", `Server-Plattform ${target} passt`],
+          [700, "info", `Lade Paket ${pkg.id} hoch (${formatSize(pkg.size)}) …`],
           [900, "ok", `Release ${rel} hochgeladen`],
           [300, "ok", `current → releases/${rel}`],
-          [500, "ok", `systemd-User-Service ${"styrixa-" + slug} gestartet`],
+          [500, "ok", "systemd-User-Service styrixa gestartet"],
           [700, "info", `Health-Check 127.0.0.1:${dep.appPort}/healthz …`],
           [600, "ok", "App antwortet"],
         ]
       : [
           [400, "ok", `Angemeldet als ${dep.user} (FTPS, Zertifikat gepinnt)`],
           [300, "ok", "Datenordner styrixa-data/ angelegt und geschützt"],
-          [900, "info", `Lade styrixa.cgi hoch (${fmtSize(estKb)}) …`],
+          [900, "info", `Lade styrixa.cgi aus ${pkg.id} hoch (${formatSize(pkg.size)}) …`],
           [500, "ok", "styrixa.cgi aktiv (Rechte 755)"],
           [400, "warn", `Bestehende .htaccess gesichert als .htaccess.styrixa-backup-${rel}`],
           [300, "ok", "CGI-Routing eingerichtet"],
@@ -496,7 +294,9 @@ export default function StyrixaFactoryConfigurator() {
           hints: isSSH
             ? [`App lauscht auf 127.0.0.1:${dep.appPort} – Domain per Caddy/nginx darauf zeigen lassen.`]
             : ["CGI-Modus: ideal für kleine bis mittlere Websites."],
-          caddy: isSSH ? `${(dep.publicUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "")) || "kunde.at"} {\n\treverse_proxy 127.0.0.1:${dep.appPort}\n}` : null,
+          caddy: isSSH
+            ? `${dep.publicUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "") || "kunde.at"} {\n\treverse_proxy 127.0.0.1:${dep.appPort}\n}`
+            : null,
         });
         setDeployPhase("done");
       }, acc + 300)
@@ -504,6 +304,7 @@ export default function StyrixaFactoryConfigurator() {
   }
 
   function startDeploy(fp = confirmedFp) {
+    if (!pkg) return;
     resetDeploy();
     setDeployPhase("running");
     if (MOCK_DEPLOY) return mockDeploy(fp);
@@ -520,55 +321,36 @@ export default function StyrixaFactoryConfigurator() {
     startDeploy(fp);
   }
 
-  function copyCmd() {
-    try {
-      navigator.clipboard.writeText(buildCmd.replace(/\\\n\s*/g, ""));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch (_) {
-      /* clipboard nicht verfügbar */
-    }
+  /* ---- Lade- und Fehlerzustand des Katalogs ---- */
+  if (!catalog) {
+    return (
+      <Shell release={null}>
+        <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-32 text-center">
+          {catalogError ? (
+            <>
+              <AlertTriangle className="h-8 w-8 text-amber-300" />
+              <p className="text-lg font-semibold text-white">{catalogError}</p>
+              <p className="text-sm text-slate-400">Die Paketliste konnte nicht geladen oder geprüft werden.</p>
+              <button
+                onClick={() => setCatalogTry((n) => n + 1)}
+                className="flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
+              >
+                <RotateCcw className="h-4 w-4" /> Erneut versuchen
+              </button>
+            </>
+          ) : (
+            <>
+              <Loader2 className="h-8 w-8 animate-spin text-cyan-300" />
+              <p className="text-sm text-slate-400">Lade signierten Paket-Katalog …</p>
+            </>
+          )}
+        </div>
+      </Shell>
+    );
   }
 
-  const progress =
-    phase === "idle" ? 0 : Math.min(100, Math.round(((stepIdx + (phase === "done" ? 0 : 0.5)) / BUILD_STEPS.length) * 100));
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 antialiased selection:bg-cyan-400/30">
-      {/* Hintergrund-Raster */}
-      <div
-        className="pointer-events-none fixed inset-0 opacity-[0.07]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(148,163,184,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.6) 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-      <div className="pointer-events-none fixed -top-40 left-1/3 h-96 w-96 rounded-full bg-cyan-500/20 blur-3xl" />
-
-      {/* Header */}
-      <header className="relative border-b border-slate-800/80 bg-slate-950/70 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            <StyrixaMark />
-            <div className="leading-tight">
-              <div className="text-lg font-black tracking-[0.18em] text-white">STYRIXA</div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Digital Technology Studio</div>
-            </div>
-            <span className="ml-4 hidden rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300 sm:inline">
-              Factory Platform
-            </span>
-          </div>
-          <div className="flex items-center gap-4 text-xs text-slate-500">
-            <span className="hidden items-center gap-1.5 md:flex">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400" />
-              Build-Worker online
-            </span>
-            <span className="font-mono">go1.23 · cms v0.1.0</span>
-          </div>
-        </div>
-      </header>
-
+    <Shell release={catalog.release}>
       <main className="relative mx-auto grid max-w-7xl gap-8 px-6 py-10 lg:grid-cols-[1fr_400px]">
         {/* ------------------------- Linke Spalte ------------------------- */}
         <section>
@@ -578,26 +360,26 @@ export default function StyrixaFactoryConfigurator() {
               Dein STYRIXA CMS, als ein einziges Binary.
             </h1>
             <p className="mt-3 max-w-2xl text-slate-400">
-              Wähle die Module. Die Factory kompiliert daraus ein CGO-freies Go-Binary mit eingebetteter SQLite
-              und 1-Klick-Installer. Nicht gewählte Module werden per Build-Tag gar nicht erst mitkompiliert.
+              Wähle die Module. Jede Kombination liegt als CGO-freies Go-Binary mit eingebetteter SQLite und
+              Web-Installer vorgebaut und signiert bereit. Nicht gewählte Module sind gar nicht erst im Binary.
             </p>
           </div>
 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-slate-400">
-              <span className="font-semibold text-white">{activeModules.length}</span> / {MODULES.length} Module aktiv
+              <span className="font-semibold text-white">{activeModules.length}</span> / {modules.length} Module aktiv
             </div>
             <div className="flex gap-2">
               <button
                 onClick={selectMinimal}
-                disabled={locked}
+                disabled={depLocked}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
               >
                 Minimal
               </button>
               <button
                 onClick={selectAll}
-                disabled={locked}
+                disabled={depLocked}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
               >
                 Alle Module
@@ -613,14 +395,15 @@ export default function StyrixaFactoryConfigurator() {
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            {MODULES.map((m) => {
+            {modules.map((m) => {
               const on = selected.has(m.id);
-              const Icon = m.icon;
+              const meta = moduleMeta(m.id);
+              const Icon = meta.icon;
               return (
                 <button
                   key={m.id}
                   onClick={() => toggle(m)}
-                  disabled={locked}
+                  disabled={depLocked}
                   aria-pressed={on}
                   className={[
                     "group relative overflow-hidden rounded-2xl border p-5 text-left transition",
@@ -628,7 +411,7 @@ export default function StyrixaFactoryConfigurator() {
                       ? "border-cyan-400/50 bg-gradient-to-br from-cyan-500/10 to-emerald-500/5 shadow-[0_0_0_1px_rgba(34,211,238,.15),0_10px_40px_-15px_rgba(34,211,238,.4)]"
                       : "border-slate-800 bg-slate-900/50 hover:border-slate-600",
                     m.required ? "cursor-default" : "cursor-pointer",
-                    locked ? "opacity-70" : "",
+                    depLocked ? "opacity-70" : "",
                   ].join(" ")}
                 >
                   <div className="mb-4 flex items-start justify-between">
@@ -660,21 +443,25 @@ export default function StyrixaFactoryConfigurator() {
                     </div>
                   </div>
 
-                  <p className="mb-4 text-sm leading-relaxed text-slate-400">{m.desc}</p>
+                  <p className="mb-4 text-sm leading-relaxed text-slate-400">{meta.desc}</p>
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {m.features.map((f) => (
-                      <span key={f} className="rounded-md bg-slate-800/80 px-2 py-0.5 text-[11px] text-slate-300">
-                        {f}
-                      </span>
-                    ))}
-                  </div>
+                  {meta.features.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {meta.features.map((f) => (
+                        <span key={f} className="rounded-md bg-slate-800/80 px-2 py-0.5 text-[11px] text-slate-300">
+                          {f}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="mt-4 flex items-center justify-between border-t border-slate-800 pt-3 font-mono text-[11px]">
-                    <span className={on ? "text-cyan-300" : "text-slate-500"}>{m.tag}</span>
+                    <span className={on ? "text-cyan-300" : "text-slate-500"}>mod_{m.id}</span>
                     <span className="text-slate-500">
-                      {m.required ? "Pflicht" : `+${fmtSize(m.sizeKb)}`}
-                      {m.requires && <span className="ml-2 text-amber-300/80">↳ mod_{m.requires.join(", mod_")}</span>}
+                      {m.required && "Pflicht"}
+                      {m.requires?.length > 0 && (
+                        <span className="ml-2 text-amber-300/80">↳ mod_{m.requires.join(", mod_")}</span>
+                      )}
                     </span>
                   </div>
                 </button>
@@ -707,69 +494,33 @@ export default function StyrixaFactoryConfigurator() {
           <div className="mt-12">
             <p className="mb-2 font-mono text-xs uppercase tracking-[0.25em] text-cyan-400">Schritt 2 · Zielplattform</p>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {TARGETS.map((t) => {
-                const on = t.id === target;
-                const Icon = t.icon;
+              {targets.map((t) => {
+                const on = t === target;
+                const Icon = targetIcon(t);
+                const meta = targetMeta(t);
                 return (
                   <button
-                    key={t.id}
-                    disabled={locked}
-                    onClick={() => {
-                      setTarget(t.id);
-                      if (phase === "done") resetBuild();
-                    }}
+                    key={t}
+                    disabled={depLocked}
+                    onClick={() => setTarget(t)}
                     className={[
                       "rounded-xl border p-4 text-left transition disabled:opacity-60",
                       on ? "border-cyan-400/60 bg-cyan-500/10" : "border-slate-800 bg-slate-900/50 hover:border-slate-600",
                     ].join(" ")}
                   >
                     <Icon className={`mb-3 h-5 w-5 ${on ? "text-cyan-300" : "text-slate-500"}`} />
-                    <div className="text-sm font-semibold text-white">{t.label}</div>
-                    <div className="text-xs text-slate-500">{t.sub}</div>
-                    <div className="mt-2 font-mono text-[10px] text-slate-600">
-                      {t.goos}/{t.goarch}
-                    </div>
+                    <div className="text-sm font-semibold text-white">{meta.label}</div>
+                    <div className="text-xs text-slate-500">{meta.sub}</div>
+                    <div className="mt-2 font-mono text-[10px] text-slate-600">{t}</div>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Defaults */}
-          <div className="mt-12">
-            <p className="mb-2 font-mono text-xs uppercase tracking-[0.25em] text-cyan-400">Schritt 3 · Paket</p>
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-slate-400">Paketname</span>
-                <input
-                  value={siteName}
-                  disabled={locked}
-                  onChange={(e) => setSiteName(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-400"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-slate-400">Vorausgewählte Region im Installer</span>
-                <select
-                  value={region}
-                  disabled={locked}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400"
-                >
-                  <option value="de-AT">Österreich (de-AT)</option>
-                  <option value="de-DE">Deutschland (de-DE)</option>
-                  <option value="de-CH">Schweiz (de-CH)</option>
-                </select>
-              </label>
-            </div>
-            <p className="mt-2 text-xs text-slate-500">
-              Seitentitel, GISA-Nummer und Admin-Account werden erst beim ersten Start unter <span className="font-mono">/install</span> gesetzt.
-            </p>
-          </div>
-
           {/* Auslieferung */}
           <div className="mt-12">
-            <p className="mb-2 font-mono text-xs uppercase tracking-[0.25em] text-cyan-400">Schritt 4 · Auslieferung</p>
+            <p className="mb-2 font-mono text-xs uppercase tracking-[0.25em] text-cyan-400">Schritt 3 · Auslieferung</p>
             <div className="grid gap-3 md:grid-cols-3">
               {DELIVERY.map((d) => {
                 const on = d.id === delivery;
@@ -777,7 +528,7 @@ export default function StyrixaFactoryConfigurator() {
                 return (
                   <button
                     key={d.id}
-                    disabled={locked || depLocked}
+                    disabled={depLocked}
                     onClick={() => {
                       setDelivery(d.id);
                       setConfirmedFp("");
@@ -897,176 +648,91 @@ export default function StyrixaFactoryConfigurator() {
           <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 backdrop-blur">
             <div className="border-b border-slate-800 p-5">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="font-semibold text-white">Build-Übersicht</h2>
-                <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-300">
-                  CGO_ENABLED=0
-                </span>
+                <h2 className="font-semibold text-white">Paket</h2>
+                {pkgLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-cyan-300" />
+                ) : (
+                  <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 font-mono text-[11px] text-emerald-300">
+                    CGO_ENABLED=0
+                  </span>
+                )}
               </div>
 
               <dl className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Ziel</dt>
-                  <dd className="font-mono text-slate-200">
-                    {tgt.goos}/{tgt.goarch}
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Module</dt>
-                  <dd className="text-slate-200">{activeModules.length}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Binary (geschätzt)</dt>
-                  <dd className="font-mono text-slate-200">~{fmtSize(estKb)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">RAM im Betrieb</dt>
-                  <dd className="font-mono text-slate-200">&lt; 20 MB</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">Artefakt</dt>
-                  <dd className="max-w-[200px] truncate font-mono text-xs text-slate-200" title={artifact}>
-                    {artifact}
-                  </dd>
-                </div>
+                <Row label="Ziel" value={target} mono />
+                <Row label="Module" value={activeModules.length} />
+                <Row label="Paket-ID" value={pkg?.id ?? "—"} mono small />
+                <Row label="Datei" value={pkg?.file ?? "—"} mono small />
+                <Row label="Größe" value={pkg ? formatSize(pkg.size) : "—"} mono />
+                <Row label="SHA-256" value={pkg ? pkg.sha256.slice(0, 12) + "…" : "—"} title={pkg?.sha256} mono small />
+                <Row label="Release" value={pkg?.release ?? catalog.release} mono />
+                <Row label="RAM im Betrieb" value="< 20 MB" mono />
               </dl>
 
               <div className="mt-4 flex flex-wrap gap-1.5">
-                {tags.map((t) => (
-                  <span key={t} className="rounded bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-cyan-300">
-                    {t}
+                {activeModules.map((m) => (
+                  <span key={m.id} className="rounded bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-cyan-300">
+                    mod_{m.id}
                   </span>
                 ))}
               </div>
             </div>
 
-            {/* Befehl */}
-            <div className="border-b border-slate-800 bg-slate-950/60 p-5">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <Terminal className="h-3.5 w-3.5" /> Build-Befehl (Worker)
-                </span>
-                <button onClick={copyCmd} className="flex items-center gap-1 text-xs text-slate-400 hover:text-white">
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? "Kopiert" : "Kopieren"}
-                </button>
-              </div>
-              <pre className="overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-emerald-300/90">
-                {buildCmd}
-              </pre>
-            </div>
-
-            {/* Build-Prozess */}
-            <div className="p-5">
-              {phase !== "idle" && (
-                <>
-                  <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-500"
-                      style={{ width: `${phase === "done" ? 100 : progress}%` }}
-                    />
-                  </div>
-                  <ol className="mb-4 space-y-1.5">
-                    {BUILD_STEPS.map((s, i) => {
-                      const done = i < stepIdx || phase === "done";
-                      const active = i === stepIdx && phase === "running";
-                      return (
-                        <li key={s.key} className="flex items-center gap-2 text-xs">
-                          {done ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-400" />
-                          ) : active ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-cyan-300" />
-                          ) : (
-                            <span className="h-3.5 w-3.5 rounded-full border border-slate-700" />
-                          )}
-                          <span className={done ? "text-slate-300" : active ? "text-white" : "text-slate-600"}>
-                            {s.label}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                  <div
-                    ref={logRef}
-                    className="mb-4 h-44 overflow-y-auto rounded-lg border border-slate-800 bg-black/60 p-3 font-mono text-[10.5px] leading-relaxed"
-                  >
-                    {logs.map((l, i) => (
-                      <div
-                        key={i}
-                        className={
-                          l.includes("✓") ? "text-emerald-300" : l.startsWith("▸") ? "text-cyan-300" : "text-slate-400"
-                        }
-                      >
-                        {l}
-                      </div>
-                    ))}
-                    {phase === "running" && <span className="inline-block h-3 w-1.5 animate-pulse bg-cyan-300" />}
-                  </div>
-                </>
+            <div className="space-y-3 p-5">
+              {pkgError && (
+                <div className="flex items-start gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {pkgError}
+                </div>
               )}
 
-              {phase === "done" && result ? (
-                <div className="space-y-3">
-                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                    <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-emerald-200">
-                      <ShieldCheck className="h-4 w-4" /> Build erfolgreich
-                    </div>
-                    <div className="font-mono text-[11px] text-emerald-200/70">
-                      {result.id} · {result.at} · Binary {result.bin} · Paket {result.size}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => alert(`Mockup: Download von ${result.file}`)}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 font-semibold text-slate-950 transition hover:bg-slate-200"
-                  >
-                    <Download className="h-4 w-4" /> {result.file}
-                  </button>
-                  <div className="rounded-lg bg-slate-950/60 p-3 font-mono text-[10.5px] leading-relaxed text-slate-400">
-                    <div className="text-slate-500"># Auf dem Server</div>
-                    tar -xzf {result.file}
-                    <br />./{binName} --addr :8080
-                    <br />
-                    <span className="text-slate-500"># → http://host:8080/install</span>
-                  </div>
-                  {delivery !== "download" && (
-                    <DeployPanel
-                      delivery={delivery}
-                      phase={deployPhase}
-                      logs={deployLogs}
-                      result={deployResult}
-                      errors={deployErrors}
-                      host={dep.host}
-                      onDeploy={() => startDeploy()}
-                    />
-                  )}
-                  <button
-                    onClick={resetBuild}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-500"
-                  >
-                    <RotateCcw className="h-4 w-4" /> Neue Konfiguration
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={startBuild}
-                  disabled={locked}
-                  className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 px-4 py-3.5 font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110 disabled:cursor-wait disabled:opacity-80"
+              {pkg && !pkgLoading ? (
+                <a
+                  href={pkg.downloadUrl}
+                  download={pkg.file}
+                  className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 px-4 py-3.5 font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110"
                 >
-                  {locked ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin" /> Kompiliere …
-                    </>
-                  ) : (
-                    <>
-                      <Rocket className="h-5 w-5 transition group-hover:-translate-y-0.5" /> Deploy / Build
-                    </>
-                  )}
-                </button>
+                  <Download className="h-5 w-5 transition group-hover:translate-y-0.5" /> Herunterladen
+                </a>
+              ) : (
+                <span
+                  aria-disabled="true"
+                  className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-3.5 font-bold text-slate-500"
+                >
+                  {pkgLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />} Herunterladen
+                </span>
+              )}
+              <p className="flex items-center justify-center gap-1.5 text-xs text-emerald-300/80">
+                <ShieldCheck className="h-3.5 w-3.5" /> Signiert und geprüft
+              </p>
+
+              {pkg && (
+                <div className="rounded-lg bg-slate-950/60 p-3 font-mono text-[10.5px] leading-relaxed text-slate-400">
+                  <div className="text-slate-500"># Auf dem Server</div>
+                  tar -xzf {pkg.file}
+                  <br />./{binName} --addr :8080
+                  <br />
+                  <span className="text-slate-500"># → http://host:8080/install</span>
+                </div>
+              )}
+
+              {delivery !== "download" && pkg && (
+                <DeployPanel
+                  delivery={delivery}
+                  phase={deployPhase}
+                  logs={deployLogs}
+                  result={deployResult}
+                  errors={deployErrors}
+                  host={dep.host}
+                  onDeploy={() => startDeploy()}
+                />
               )}
             </div>
           </div>
 
           <p className="mt-4 px-1 text-[11px] leading-relaxed text-slate-600">
-            Reproduzierbar: gleiche Config + gleicher Template-Commit ergeben dasselbe Binary (-trimpath, vendored deps).
+            Alle Kombinationen werden bei jedem Release in der CI gebaut und per ed25519 signiert. Die Factory prüft
+            die Prüfsumme bei jedem Abruf.
           </p>
         </aside>
       </main>
@@ -1075,10 +741,68 @@ export default function StyrixaFactoryConfigurator() {
         <IdentityModal identity={identity} host={dep.host} onConfirm={confirmIdentity}
           onCancel={() => { setIdentity(null); setDeployPhase("idle"); pushLog("warn", "Deployment abgebrochen – Fingerprint nicht bestätigt"); }} />
       )}
+    </Shell>
+  );
+}
+
+/* ------------------------- Rahmen ------------------------- */
+function Shell({ release, children }) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 antialiased selection:bg-cyan-400/30">
+      {/* Hintergrund-Raster */}
+      <div
+        className="pointer-events-none fixed inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(148,163,184,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.6) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
+      <div className="pointer-events-none fixed -top-40 left-1/3 h-96 w-96 rounded-full bg-cyan-500/20 blur-3xl" />
+
+      <header className="relative border-b border-slate-800/80 bg-slate-950/70 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <StyrixaMark />
+            <div className="leading-tight">
+              <div className="text-lg font-black tracking-[0.18em] text-white">STYRIXA</div>
+              <div className="text-[10px] uppercase tracking-[0.28em] text-slate-500">Digital Technology Studio</div>
+            </div>
+            <span className="ml-4 hidden rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300 sm:inline">
+              Factory Platform
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-slate-500">
+            {release && (
+              <span className="hidden items-center gap-1.5 md:flex">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400" />
+                Katalog geprüft
+              </span>
+            )}
+            <span className="font-mono">cms {release ?? "…"}</span>
+          </div>
+        </div>
+      </header>
+
+      {children}
 
       <footer className="relative border-t border-slate-800/80 py-6 text-center text-xs text-slate-600">
         STYRIXA Digital Technology Studio · Graz · Factory Platform Preview
       </footer>
+    </div>
+  );
+}
+
+function Row({ label, value, title, mono, small }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd
+        className={["truncate text-slate-200", mono ? "font-mono" : "", small ? "text-xs leading-5" : ""].join(" ")}
+        title={title ?? String(value)}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

@@ -13,7 +13,7 @@ matrix:
 	scripts/matrix-build.sh
 
 ui:
-	npx --yes esbuild@0.24.0 factory-ui/src/StyrixaFactoryConfigurator.jsx --loader:.jsx=jsx > /dev/null
+	cd factory-ui && npm ci && npm run build && npm test
 
 check: test cgo matrix ui
 	@test -z "$$(gofmt -l cms-template factory-api)" || (gofmt -l cms-template factory-api; echo "gofmt!"; exit 1)

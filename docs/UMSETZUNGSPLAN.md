@@ -120,8 +120,18 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - Cache lazy: Ein Paket wird beim ersten Abruf von GitHub geladen (temp → Hash prüfen → rename nach `<cache>/<sha256>.tar.gz`). Bei jedem Abruf wird neu gehasht; das Binary wird für jeden Deploy frisch aus dem geprüften Archiv entpackt. Katalog im Speicher, TTL 10 min, Aktualisierung im Hintergrund, alter Stand gilt bis zum geprüften neuen. Ohne gültigen Katalog höchstens ein GitHub-Versuch pro 10 s.
     - Nicht umgesetzt: Schutz gegen Downgrade (ein älterer, gültig signierter Release als „latest“). Bei Bedarf mit 6.3 (Updates) klären.
     - `factory-api` loggt jetzt mit `slog`.
-- [ ] **2.2** `factory-ui` als Vite-Projekt, Module aus `modules.json`, „Build“ = Paket auswählen, echter Download
+- [x] **2.2** `factory-ui` als Vite-Projekt, Module aus `modules.json`, „Build“ = Paket auswählen, echter Download
   - *Abnahme:* Download startet sofort, Paket entspricht der Auswahl
+  - *Erledigt 2026-11-25, Abweichungen/Messwerte:*
+    - Gegen echtes GitHub (Release `v0.2.0`, öffentliches Repo, kein Token nötig), `factory-api --ui ../factory-ui/dist`, Auswahl im UI:
+      - `media` + `shop`, `linux/amd64` → `styrixa_media-shop_linux_amd64.tar.gz`, 5,8 MB; erster Abruf 1,26 s, zweiter 15 ms; SHA-256 `888daf5e…0ac6` = UI = `SHA256SUMS` ✓
+      - nur Pflichtmodule, `darwin/arm64` → `styrixa_core_darwin_arm64.tar.gz`, 5,2 MB; erster Abruf 1,46 s, zweiter 10 ms; SHA-256 `d3fea1ef…24c8` = UI = `SHA256SUMS` ✓
+      - Download-Prüfung per `curl` auf genau die `href` des Buttons (`<a download>`, gleicher Ursprung); UI ohne Konsolenfehler unter der CSP.
+    - Vite 8, React 19, Tailwind 4, lucide-react 1. Dev-Proxy geprüft (`/api/catalog`, 422-Meldung kommt durch). Achtung: `vite` lauscht auf `localhost` (IPv6), nicht `127.0.0.1`.
+    - Logik in `src/lib/` (`selection.js`, `api.js`, `sse.js`, `moduleMeta.js`), 18 Tests mit `node --test`. Abhängigkeiten werden transitiv aufgelöst. `npm test` = `node --test src/lib/*.test.js` (Shell-Glob statt Ordner, läuft so auf jeder Node-Version ≥ 20).
+    - Entfernt: geschätzte Größen, simulierter Build, `go build`-Befehl, Schritt „Paket“ (Paketname/Region – vorgebaute Pakete haben keine Kundenkonfiguration; Region wählt der Installer). Deploy bleibt simuliert (`MOCK_DEPLOY`), nutzt aber schon Paket-ID und echte Größe; Deploy-Code nutzt bereits `lib/api.js` + `lib/sse.js`.
+    - `factory-api`: neues Paket `internal/ui` (`http.FileServerFS(os.DirFS)`, keine Verzeichnislisten, `/api/*` nie aus dem UI-Ordner); `--ui` prüft beim Start, dass `index.html` existiert.
+    - `go run ./factory-api/cmd/factory-api` aus dem Repo-Wurzelordner geht nicht (kein `go.work`) – aus `factory-api/` starten (`CLAUDE.md` angepasst).
 - [ ] **2.3** Echter Deploy aus dem UI (`MOCK_DEPLOY=false`); einmal auf echtem VPS und echtem Shared-Webspace
   - *Abnahme:* CMS läuft auf beiden, `/install` erreichbar
 
