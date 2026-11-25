@@ -61,7 +61,9 @@ Leitlinie für alle Entscheidungen: **die günstigste Lösung, die das Risiko vo
 
 ## 005 – Hintergrundaufgaben
 
-**Entscheidung:** Keine Daemons. Lazy-Jobs bei Anfragen (z. B. Sitemap neu erzeugen, wenn älter als X und sich Inhalte geändert haben) + optionaler Cron-Endpunkt `/cron?token=…`. CGI-tauglich.
+**Entscheidung:** Keine Daemons. Lazy-Jobs bei Anfragen (z. B. Sitemap neu erzeugen, wenn älter als X und sich Inhalte geändert haben) + optionaler Cron-Endpunkt `/cron`. CGI-tauglich.
+
+**Ergänzung (Session 1.6, Nutzerentscheidung):** Der Cron-Token kommt **nur im Header** `X-Styrixa-Cron-Token` (`curl -fsS -H 'X-Styrixa-Cron-Token: …' https://…/cron`), nie in der URL – sonst landet er in den Access-Logs von Hoster und Proxy. In den Settings steht nur sein SHA-256 (`core.cron.token_sha256`); ohne Token ist `/cron` 404.
 
 ## 006 – Updates der Kunden-CMS
 

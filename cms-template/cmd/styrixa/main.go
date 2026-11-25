@@ -14,11 +14,12 @@ import (
 	"context"
 	"database/sql"
 	"flag"
-	"log"
 	"log/slog"
 	"net/http"
 	"net/http/cgi"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/julianirmler/styrixa-cms/internal/core"
@@ -27,20 +28,28 @@ import (
 func main() {
 	addr := flag.String("addr", envOr("STYRIXA_ADDR", "127.0.0.1:8080"), "Listen-Adresse")
 	flag.Parse()
+	cgiMode := os.Getenv("GATEWAY_INTERFACE") != "" // von Apache als CGI gestartet
+
+	// Logs auf stderr. Im CGI-Modus landen sie im Apache-Error-Log jeder
+	// Anfrage – dort nur Warnungen und Fehler.
+	level := slog.LevelInfo
+	if cgiMode {
+		level = slog.LevelWarn
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 
 	mods, err := core.Modules()
 	if err != nil {
-		log.Fatal(err)
+		fatal("Module", err)
 	}
 	dataDir := envOr("STYRIXA_DATA", "data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		log.Fatal(err)
+		fatal("Datenordner", err)
 	}
-	cgiMode := os.Getenv("GATEWAY_INTERFACE") != "" // von Apache als CGI gestartet
 
 	db, err := core.OpenDB(dataDir)
 	if err != nil {
-		log.Fatal(err)
+		fatal("Datenbank", err)
 	}
 	defer db.Close()
 	if cgiMode {
@@ -50,7 +59,7 @@ func main() {
 	err = core.Migrate(ctx, db, mods)
 	cancel()
 	if err != nil {
-		log.Fatal(err)
+		fatal("Migrationen", err)
 	}
 
 	if !cgiMode {
@@ -64,65 +73,106 @@ func main() {
 		}
 	}
 
-	handler, err := newHandler(db, dataDir, mods)
+	handler, jobs, err := newHandler(db, dataDir, mods)
 	if err != nil {
-		log.Fatal(err)
+		fatal("Handler", err)
 	}
 
 	if cgiMode {
-		// Hoster-Check der Factory ruft …/styrixa.cgi/healthz in einem Prüfordner auf:
-		// dann ist nur PATH_INFO aussagekräftig, nicht der volle Pfad.
-		h := handler
-		if os.Getenv("PATH_INFO") == "/healthz" {
-			h = core.SecurityHeaders(http.HandlerFunc(health))
-		}
-		if err := cgi.Serve(h); err != nil {
-			log.Fatal(err)
-		}
+		serveCGI(handler, jobs, db, mods)
 		return
 	}
 
-	srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("STYRIXA CMS lauscht auf %s (%d Module, Daten: %s)", *addr, len(mods), dataDir)
-	log.Fatal(srv.ListenAndServe())
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           core.AfterResponse(handler, lazyJob(jobs)),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	slog.Info("STYRIXA CMS lauscht", "addr", *addr, "module", len(mods), "daten", dataDir)
+	fatal("Server", srv.ListenAndServe())
 }
 
-// health antwortet auf den Hoster-Check der Factory (erwartet genau „ok“).
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write([]byte("ok"))
+// serveCGI beantwortet genau eine Anfrage und erledigt danach – ohne
+// Hintergrundprozess – aufgeschobene Arbeit oder höchstens einen fälligen Job.
+func serveCGI(handler http.Handler, jobs *core.Jobs, db *sql.DB, mods []core.Module) {
+	// Hoster-Check der Factory ruft …/styrixa.cgi/healthz in einem Prüfordner auf:
+	// dann ist nur PATH_INFO aussagekräftig, nicht der volle Pfad.
+	healthOnly := os.Getenv("PATH_INFO") == "/healthz"
+	if healthOnly {
+		handler = core.SecurityHeaders(core.Health(db, mods))
+	}
+	after := &core.After{}
+	err := cgi.Serve(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, after.Attach(r))
+	}))
+	if err != nil {
+		fatal("CGI", err)
+	}
+	if healthOnly || os.Getenv("PATH_INFO") == core.PathCron {
+		return
+	}
+	// Antwort abschließen: Apache sieht EOF und liefert sie aus. Danach schickt
+	// Apache SIGTERM (nach 3 s SIGKILL) – ignorieren, damit die Arbeit im
+	// Budget (core.AfterBudget) fertig wird und ihr Ergebnis speichern kann.
+	signal.Ignore(syscall.SIGTERM)
+	os.Stdout.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), core.AfterBudget)
+	defer cancel()
+	if after.Pending() {
+		after.Run(ctx)
+		return
+	}
+	lazyJob(jobs)(ctx)
+}
+
+// lazyJob führt höchstens einen fälligen Job aus (nach einer Antwort).
+func lazyJob(jobs *core.Jobs) func(context.Context) {
+	return func(ctx context.Context) {
+		if _, err := jobs.RunDue(ctx, core.LazyBudget); err != nil {
+			slog.Error("lazy-job", "err", err)
+		}
+	}
+}
+
+func fatal(what string, err error) {
+	slog.Error(what, "err", err)
+	os.Exit(1)
 }
 
 // newHandler baut den kompletten Handler – identisch für Server- und CGI-Modus.
-func newHandler(db *sql.DB, dataDir string, mods []core.Module) (http.Handler, error) {
+// Arbeit nach der Antwort (core.AfterResponse bzw. serveCGI) hängt main darum.
+func newHandler(db *sql.DB, dataDir string, mods []core.Module) (http.Handler, *core.Jobs, error) {
 	settings := core.SettingsStore{DB: db}
 	installer := &core.Installer{DB: db, DataDir: dataDir}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", health)
+	mux.HandleFunc("GET /healthz", core.Health(db, mods))
 	installer.Mount(mux)
 	auth := &core.Auth{DB: db, Settings: settings, Mail: core.SMTPMailer{Settings: settings}}
 	auth.Mount(mux)
 	admin, err := core.NewAdmin(db, settings, mods)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	admin.Mount(mux)
 	public, err := core.NewPublic(settings, mods)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	public.Mount(mux) // Startseite + 404 für alles, was keine andere Route trifft
 	deps := core.Deps{DB: db, Settings: settings, Admin: admin}
 	for _, m := range mods {
 		m.Mount(mux, deps)
 	}
+	jobs := &core.Jobs{Deps: deps}
+	jobs.Mount(mux) // GET /cron mit Header X-Styrixa-Cron-Token
 	// Von innen nach außen: Login + CSRF-Token für /admin/*, Cross-Origin-Schutz
 	// für alle Nicht-GET-Anfragen (Anfragen ohne Origin/Sec-Fetch-Site wie der
 	// Stripe-Webhook kommen durch), Umleitung auf /install vor der Einrichtung,
 	// Sicherheits-Header für jede Antwort, 500-Seite statt Absturz bei Panics.
 	h := installer.RequireInstalled(http.NewCrossOriginProtection().Handler(auth.Require(mux)))
-	return public.Recover(core.SecurityHeaders(h)), nil
+	return public.Recover(core.SecurityHeaders(h)), jobs, nil
 }
 
 func envOr(k, def string) string {

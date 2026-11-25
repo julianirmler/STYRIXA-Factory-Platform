@@ -62,23 +62,7 @@ const schemaMigrationsDDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
 // Gibt es nichts zu tun, kostet ein Aufruf zwei kurze Abfragen – wichtig, weil im
 // CGI-Modus jede Anfrage migriert.
 func Migrate(ctx context.Context, db *sql.DB, mods []Module) error {
-	all, err := loadMigrations(CoreID, coreMigrationsFS())
-	if err != nil {
-		return err
-	}
-	for _, m := range mods {
-		ms, err := loadMigrations(m.ID(), m.Migrations())
-		if err != nil {
-			return err
-		}
-		all = append(all, ms...)
-	}
-
-	applied, err := readApplied(ctx, db)
-	if err != nil {
-		return err
-	}
-	pending, err := plan(all, applied)
+	pending, err := pendingMigrations(ctx, db, mods)
 	if err != nil || len(pending) == 0 {
 		return err
 	}
@@ -88,6 +72,32 @@ func Migrate(ctx context.Context, db *sql.DB, mods []Module) error {
 		}
 	}
 	return nil
+}
+
+// MigrationsPending liefert die Zahl der ausstehenden Migrationen (für /healthz).
+// Ein Fehler bedeutet: Datenbank nicht lesbar oder Migrationen passen nicht zum Binary.
+func MigrationsPending(ctx context.Context, db *sql.DB, mods []Module) (int, error) {
+	pending, err := pendingMigrations(ctx, db, mods)
+	return len(pending), err
+}
+
+func pendingMigrations(ctx context.Context, db *sql.DB, mods []Module) ([]migration, error) {
+	all, err := loadMigrations(CoreID, coreMigrationsFS())
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range mods {
+		ms, err := loadMigrations(m.ID(), m.Migrations())
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, ms...)
+	}
+	applied, err := readApplied(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return plan(all, applied)
 }
 
 func loadMigrations(module string, fsys fs.FS) ([]migration, error) {

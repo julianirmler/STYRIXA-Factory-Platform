@@ -27,6 +27,8 @@ jobs:
         run: test -z "$(gofmt -l cms-template factory-api)"
       - name: Tests
         run: make test
+      - name: M1 – RSS mit allen Modulen anzeigen (< 20 MB, läuft auch in make test)
+        run: cd cms-template && go test -count=1 -v -run '^TestServerRSSBelow20MB$' ./cmd/styrixa | grep -E 'RSS|ok|FAIL'
       - name: Keine CGO-Abhängigkeiten
         run: make cgo
       - name: Alle Modul-Kombinationen bauen + Negativtests

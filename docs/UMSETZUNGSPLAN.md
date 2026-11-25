@@ -93,8 +93,18 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `core.SecurityHeaders` (nosniff, `Referrer-Policy: strict-origin-when-cross-origin`, Admin-CSP für `/admin/*`) und `Public.Recover` (Panic → 500-Seite, Stack nur ins Log) umschließen den ganzen Handler. Login/Install behalten ihre strengere `no-referrer`-Policy und eigene CSP (Inline-Styles).
     - Alles, was keine Route trifft, bekommt die Theme-404 (auch falsche Methode statt 405); unter `/admin/*` schlichter Text ohne Theme. 500 bei Template-Fehler zeigt keine Teilausgabe; scheitert auch die 500-Seite, kommt Klartext.
     - Für Phase 5 offen: Module bekommen noch keinen Zugriff auf die Theme-404 (`Deps.Public` o. ä.), z. B. für unbekannte Produkte.
-- [ ] **1.6** Lazy-Jobs + Cron-Endpunkt (ADR-005), Logging, `/healthz` mit DB-Check
+- [x] **1.6** Lazy-Jobs + Cron-Endpunkt (ADR-005), Logging, `/healthz` mit DB-Check
   - *Abnahme:* Job läuft im CGI-Modus ohne Hintergrundprozess
+  - *Erledigt 2026-11-25, Abweichungen/Entscheidungen:*
+    - Abnahmetest `cmd/styrixa/jobs_test.go`: echtes Binary über `net/http/cgi.Handler`; der Kern-Job `core.cleanup` (stündlich: abgelaufene Sessions, benutzte/abgelaufene Reset-Tokens, alte Fehlversuche) läuft nach der Antwort im selben Prozess und löscht eine abgelaufene Session; zweite Anfrage → nicht erneut. Parallelität: 8 echte Prozesse → Job genau einmal (`internal/core/jobs_test.go`).
+    - **Cron-Token nur im Header** `X-Styrixa-Cron-Token` (Nutzerentscheidung, ADR-005 ergänzt). Gespeichert nur als SHA-256 (`core.cron.token_sha256`, `core.NewCronToken`); ohne eingerichteten Token, mit falschem oder mit Token in der URL → 404. Fehlgeschlagener Job → 500 „Fehler“ ohne Details.
+    - **Offen (Nutzerentscheidung):** Der Kunde bekommt den Cron-Token erst mit der Admin-Settings-Seite (neuen Token erzeugen, einmal anzeigen). Bis dahin ist `/cron` aus, Lazy-Jobs reichen.
+    - „Nach der Antwort“ als gemeinsamer Mechanismus `core.After`/`core.Defer`: CGI – nach `cgi.Serve` stdout schließen (Apache liefert aus), `SIGTERM` ignorieren (Apache beendet CGI-Prozesse nach der Antwort mit SIGTERM, nach 3 s SIGKILL), Budget `core.AfterBudget` = 2,5 s. Server – `core.AfterResponse` puffert die Antwort (bis 1 MB), schließt sie mit `Content-Length` ab und flusht, dann folgt die Arbeit in derselben Anfrage (keine Goroutine). Gestreamte Antworten → kein Lazy-Job.
+    - Pro Anfrage **entweder** aufgeschobene Arbeit **oder** ein Lazy-Job (gemeinsames Budget). Jobs erst nach der Installation. `last_run` wird auch bei Fehler gesetzt (sonst liefe ein kaputter Job bei jeder Anfrage); Sperre = Budget + 1 min, danach gilt ein Lauf als abgebrochen. Job-Namen `<modul>.<name>`, Intervall ≥ 1 min. Kosten ohne fälligen Job: zwei kurze Abfragen.
+    - **Reset-Mail nach der Antwort** (Nutzerentscheidung, offener Punkt aus 1.3 erledigt): Nutzer-Lookup, Token und SMTP laufen per `core.Defer` – die Antwortzeit verrät nicht mehr, ob es das Konto gibt. Der Token wird dafür nirgends zwischengespeichert.
+    - `/healthz` = `core.Health`: `SELECT 1` + `core.MigrationsPending` = 0 → `ok`, sonst 503 „nicht bereit“ ohne Details.
+    - Logging: `slog`-Text-Handler auf stderr; im CGI-Modus nur `WARN`+ (Apache-Error-Log). `log.Fatal` ersetzt.
+    - **M1-Messung:** macOS arm64, alle Module, nach 200 Anfragen: RSS 22 MB, davon gemeinsam genutzte Systembibliotheken; Physical Footprint 10,2 MB, Go-Heap ≤ 4 MB. Die RSS unter macOS ist nicht vergleichbar, darum misst `cmd/styrixa/rss_test.go` unter Linux (läuft in `make test` in der CI, Grenze 20 MB; eigener CI-Schritt zeigt den Wert). Linux-Wert: _nach dem ersten CI-Lauf eintragen_.
 
 **M1:** Installierbares Kern-CMS mit Login und Admin-Oberfläche, RAM < 20 MB.
 

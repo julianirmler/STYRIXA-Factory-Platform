@@ -56,7 +56,7 @@ func TestPublicServerEqualsCGI(t *testing.T) {
 		}
 	}
 
-	h, err := newHandler(db, dataDir, mods)
+	h, _, err := newHandler(db, dataDir, mods)
 	if err != nil {
 		t.Fatal(err)
 	}

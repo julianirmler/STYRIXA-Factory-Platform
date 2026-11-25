@@ -459,9 +459,13 @@ func (a *Auth) forgot(w http.ResponseWriter, r *http.Request) {
 		a.render(w, http.StatusTooManyRequests, "forgot", authPage{Email: email, Error: msgTooManyReset})
 		return
 	}
-	if err := a.sendReset(ctx, email); err != nil {
-		slog.Error("auth: Reset-Mail nicht gesendet", "err", err) // nie Token oder Zugangsdaten
-	}
+	// Erst nach der Antwort nachsehen und senden: Sonst verrät die Antwortzeit,
+	// ob es das Konto gibt (Datenbank-Schreibzugriff + SMTP nur bei bekannter E-Mail).
+	Defer(r, func(ctx context.Context) {
+		if err := a.sendReset(ctx, email); err != nil {
+			slog.Error("auth: Reset-Mail nicht gesendet", "err", err) // nie Token oder Zugangsdaten
+		}
+	})
 	a.render(w, http.StatusOK, "forgot-sent", authPage{})
 }
 

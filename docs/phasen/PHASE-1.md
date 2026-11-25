@@ -125,7 +125,7 @@ Vorhanden – benutzen, nicht neu bauen:
 - [x] 1.3 Tests gegen Fixation, CSRF, Brute-Force grün
 - [x] 1.4 Build-Tag-Isolierung der Admin-Templates per Test belegt, in `make check`
 - [x] 1.5 Startseite Server = CGI (Test)
-- [ ] 1.6 Job im CGI-Modus, `/healthz` mit DB-Check, RAM < 20 MB gemessen
+- [x] 1.6 Job im CGI-Modus, `/healthz` mit DB-Check, RAM < 20 MB gemessen (Linux-Wert aus der CI, siehe Umsetzungsplan)
 - [ ] `make check` und CI grün, `go.sum` von `cms-template` ohne Prüf-Umgehung erzeugt
 
 ## Abschluss jeder Session
