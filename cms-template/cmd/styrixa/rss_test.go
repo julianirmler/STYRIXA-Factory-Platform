@@ -21,15 +21,17 @@ import (
 // Nur unter Linux (Ziel-Plattform der VPS, /proc): Die RSS unter macOS enthält
 // gemeinsam genutzte Systembibliotheken und ist nicht vergleichbar. Läuft in der CI.
 func TestServerRSSBelow20MB(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != "linux" && os.Getenv("STYRIXA_RSS_ANY_OS") == "" {
 		t.Skip("RSS-Messung nur unter Linux (/proc)")
 	}
 	if testing.Short() {
 		t.Skip("baut ein Binary")
 	}
-	out, err := exec.Command("go", "run", "../../tools/matrix").Output()
+	matrix := exec.Command("go", "run", "./tools/matrix")
+	matrix.Dir = "../.." // liest modules.json aus cms-template/
+	out, err := matrix.Output()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("tools/matrix: %v", err)
 	}
 	var tags string // längste Kombination = alle Module
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -91,6 +93,9 @@ func TestServerRSSBelow20MB(t *testing.T) {
 			io.Copy(io.Discard, res.Body)
 			res.Body.Close()
 		}
+	}
+	if runtime.GOOS != "linux" {
+		return // nur Ablauf geprüft (STYRIXA_RSS_ANY_OS)
 	}
 	status, err := os.ReadFile("/proc/" + strconv.Itoa(cmd.Process.Pid) + "/status")
 	if err != nil {
