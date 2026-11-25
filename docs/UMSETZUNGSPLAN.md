@@ -42,8 +42,15 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 **Anleitung: [`docs/phasen/PHASE-1.md`](phasen/PHASE-1.md)**
 
-- [ ] 🟣 **1.1** SQLite via `modernc.org/sqlite` (WAL, `busy_timeout`, Foreign Keys), Migrations-Runner pro Modul (`schema_migrations(module, version)`), `core.Deps.DB` befüllen; Go-Integrationstest für `shop.SQLPaymentStore`
+- [x] 🟣 **1.1** SQLite via `modernc.org/sqlite` (WAL, `busy_timeout`, Foreign Keys), Migrations-Runner pro Modul (`schema_migrations(module, version)`), `core.Deps.DB` befüllen; Go-Integrationstest für `shop.SQLPaymentStore`
   - *Abnahme:* Migrationen idempotent; zwei Prozesse parallel (CGI-Szenario) ohne „database is locked“
+  - *Erledigt 2026-11-25, Abweichungen:*
+    - `journal_mode(WAL)` steht **nicht** im DSN: Das Umschalten wartet nicht auf `busy_timeout`, zwei gleichzeitig startende Prozesse auf einer neuen DB bekamen sofort `SQLITE_BUSY`. Jetzt `ensureWAL` (einmalig umschalten, bei `SQLITE_BUSY` bis 5 s wiederholen; WAL bleibt in der Datei gespeichert).
+    - Paralleltest mit 4 Prozessen × 1000 Transaktionen statt 2 × 200 – erst damit scheitert die Gegenprobe ohne `_txlock=immediate` zuverlässig.
+    - `schema_migrations` speichert zusätzlich `name` und `checksum` (SHA-256), damit geänderte Migrationen erkannt werden.
+    - `cms-template/go.mod`: `go 1.23` → `go 1.26.0`, `modernc.org/sqlite` v1.63.0
+    - Gemessen: Server-Modus mit `mod_media mod_shop` nach Start 14,8 MB RSS
+    - Für 5.4 offen: Zahlung auf stornierte Bestellung wird nur markiert, `payment_status` bleibt `open` (siehe `orders_db_test.go`)
 - [ ] **1.2** Settings-Store, `/install`-Wizard (Seitentitel, Region de-AT/DE/CH, GISA-Nummer, Admin-Konto mit bcrypt), Sperre nach Installation; Stripe-Schlüssel aus Settings statt Umgebung
   - *Abnahme:* zweiter Aufruf von `/install` → 404; Handler-Test des Wizards
 - [ ] 🟣 **1.3** Login, Sessions (HttpOnly, Secure, SameSite=Lax), CSRF-Token, Login-Rate-Limit in der DB (CGI-tauglich), Passwort-Reset per Mail (`net/smtp`)
