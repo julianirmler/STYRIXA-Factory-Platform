@@ -30,8 +30,13 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 ## Phase 0 – Fundament (1 Session)
 
-- [ ] **0.1** `go.sum` für `factory-api` erzeugen (verifiziert), Signaturschlüssel erzeugen und als GitHub-Secret setzen, `core.ReleasePublicKey` + `VerifyRelease`, ersten Test-Release `v0.0.1` taggen – **Anleitung: [`docs/phasen/PHASE-0.md`](phasen/PHASE-0.md)**
+- [x] **0.1** `go.sum` für `factory-api` erzeugen (verifiziert), Signaturschlüssel erzeugen und als GitHub-Secret setzen, `core.ReleasePublicKey` + `VerifyRelease`, ersten Test-Release `v0.0.1` taggen – **Anleitung: [`docs/phasen/PHASE-0.md`](phasen/PHASE-0.md)**
   - *Abnahme:* CI grün; Release enthält 144 Pakete + `SHA256SUMS` + `SHA256SUMS.sig` + `modules.json`
+  - *Erledigt 2026-11-25, Abweichungen:*
+    - `factory-api/go.mod`: `go 1.23` → `go 1.26.0` (durch `go get golang.org/x/crypto@latest`), `x/crypto` v0.31.0 → v0.59.0
+    - Fehler im Release-Workflow behoben: `scripts/matrix-build.sh` schrieb bei relativem Ausgabeordner nach `cms-template/dist`, `upload-artifact` fand nichts. Ausgabeordner wird jetzt vor dem `cd` absolut gemacht. Tag `v0.0.1` danach auf den korrigierten Commit neu gesetzt (erster Lauf hatte keinen Release erzeugt).
+    - `/healthz`-Test mit `styrixa_media-shop_darwin_arm64` statt `linux_amd64` (Prüfung lief auf macOS); Prüfsumme beider Pakete ok
+    - Repo wurde auf GitHub in `STYRIXA-Factory-Platform` umbenannt; `origin` angepasst
 
 ## Phase 1 – CMS-Kern → M1 (6 Sessions)
 
