@@ -21,7 +21,8 @@ type NavItem struct {
 
 // Deps sind die Abhängigkeiten, die der Kern jedem Modul übergibt.
 type Deps struct {
-	DB *sql.DB
+	DB       *sql.DB
+	Settings Settings // Einstellungen aus core_settings; nil nur in Tests
 }
 
 // Module ist der Vertrag zwischen Kern und Modul.
@@ -37,6 +38,9 @@ var registry = map[string]Module{}
 
 // Register wird aus init() der (build-tag-geschützten) Modul-Pakete aufgerufen.
 func Register(m Module) {
+	if m.ID() == CoreID {
+		panic("styrixa: Modul-ID „core“ ist für den Kern reserviert")
+	}
 	if _, dup := registry[m.ID()]; dup {
 		panic("styrixa: Modul doppelt registriert: " + m.ID())
 	}

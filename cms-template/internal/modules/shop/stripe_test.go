@@ -297,3 +297,40 @@ func TestWebhookHandler(t *testing.T) {
 		t.Errorf("Vorkasse hat keinen Webhook: %d", c)
 	}
 }
+
+// mapSettings ist ein core.Settings im Speicher (nur Tests).
+type mapSettings map[string]string
+
+func (m mapSettings) Get(_ context.Context, k string) (string, error) { return m[k], nil }
+func (m mapSettings) Set(_ context.Context, k, v string) error        { m[k] = v; return nil }
+func (m mapSettings) GetAll(context.Context) (map[string]string, error) {
+	return m, nil
+}
+
+// Stripe wird pro Anfrage aus den Settings konfiguriert (nicht aus der Umgebung).
+func TestStripeFromSettings(t *testing.T) {
+	set := mapSettings{}
+	mux := http.NewServeMux()
+	m := &module{}
+	m.Mount(mux, core.Deps{Settings: set})
+	m.store = &fakeStore{}
+	body := `{"id":"evt_1","type":"checkout.session.completed","data":{"object":{"id":"cs_1","payment_status":"paid","client_reference_id":"STX-1","amount_total":100,"currency":"eur"}}}`
+	send := func() int {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, webhookReq(body, sign(body, time.Now().Unix(), testWH)))
+		return rec.Code
+	}
+	if c := send(); c != 404 {
+		t.Fatalf("ohne Schlüssel: %d (erwartet 404)", c)
+	}
+	// Schlüssel nachträglich gespeichert → gilt ab der nächsten Anfrage, ohne Neustart
+	set[core.KeyStripeSecretKey] = testSK
+	set[core.KeyStripeWebhookSecret] = testWH
+	if c := send(); c != 200 {
+		t.Fatalf("mit Schlüssel aus Settings: %d", c)
+	}
+	set[core.KeyStripeSecretKey] = "pk_test_falsch"
+	if c := send(); c != 404 {
+		t.Fatalf("ungültiger Schlüssel: %d (erwartet 404)", c)
+	}
+}

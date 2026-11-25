@@ -150,6 +150,17 @@ func DeploySSH(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	log.emit("upload", "ok", "Release %s hochgeladen", rel)
 
+	// Einmal-Code für /install – vor dem Start, denn der Health-Check legt die DB an.
+	code, err := newInstallCode()
+	if err != nil {
+		return nil, err
+	}
+	out, err := run(installCodeCmd(base+"/shared/data", code))
+	if err != nil {
+		return nil, fmt.Errorf("Installations-Code: %w", err)
+	}
+	installCode := parseInstallCode([]byte(out))
+
 	// 4. Umschalten (atomar) ---------------------------------------------------
 	prev, _ := run(fmt.Sprintf("readlink %s 2>/dev/null || true", q(base+"/current")))
 	prev = strings.TrimSpace(prev)
@@ -192,12 +203,13 @@ func DeploySSH(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	hints = append(hints,
 		fmt.Sprintf("Die App lauscht auf 127.0.0.1:%d. Domain per Reverse-Proxy (Caddy/nginx) darauf zeigen lassen.", t.AppPort),
-		"Erster Aufruf: /install – Seitentitel, Region, GISA-Nummer und Admin-Account einrichten.")
+		installHint(installCode, "/install"))
 	return &Result{
-		Method:  MethodSSH,
-		Release: rel,
-		URL:     url,
-		Hints:   hints,
+		Method:      MethodSSH,
+		Release:     rel,
+		URL:         url,
+		Hints:       hints,
+		InstallCode: installCode,
 		Snippets: map[string]string{
 			"caddy": CaddySnippet(domain, t.AppPort),
 			"nginx": NginxSnippet(domain, t.AppPort),

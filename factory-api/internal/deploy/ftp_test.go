@@ -141,6 +141,17 @@ func TestDeployFTPPlain(t *testing.T) {
 	if res.Method != MethodFTP {
 		t.Error(res)
 	}
+	if res.InstallCode != "" {
+		t.Error("bestehendes CMS bekommt keinen Installations-Code")
+	}
+	if _, err := os.Stat(filepath.Join(root, "styrixa-data", installCodeFile)); !os.IsNotExist(err) {
+		t.Error("Code-Datei für bestehendes CMS angelegt")
+	}
+	for _, l := range log {
+		if strings.Contains(l, "install-code") {
+			t.Errorf("Code-Datei im Log erwähnt: %s", l)
+		}
+	}
 }
 
 func TestDeployFTPSCertificatePinning(t *testing.T) {
@@ -164,11 +175,27 @@ func TestDeployFTPSCertificatePinning(t *testing.T) {
 	}
 	// 3. Bestätigter Fingerprint → Deployment über FTPS (Steuer- und Datenkanal verschlüsselt)
 	tgt.Fingerprint = idErr.Fingerprint
-	if _, err := DeployFTP(context.Background(), art, tgt, cred, nil, nil); err != nil {
+	var log []string
+	logf := func(e Event) { log = append(log, e.Msg) }
+	res, err := DeployFTP(context.Background(), art, tgt, cred, logf, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "styrixa.cgi")); err != nil {
 		t.Fatal(err)
+	}
+	// Erstinstallation: Einmal-Code liegt im Datenordner und steht im Result, nicht im Log
+	b, _ := os.ReadFile(filepath.Join(root, "styrixa-data", installCodeFile))
+	if res.InstallCode == "" || parseInstallCode(b) != res.InstallCode {
+		t.Fatalf("Installations-Code %q, Datei %q", res.InstallCode, b)
+	}
+	if strings.Contains(strings.Join(log, "\n"), res.InstallCode) {
+		t.Error("Installations-Code im Deploy-Log")
+	}
+	// Wiederholter Deploy vor der Installation liefert denselben Code
+	res2, err := DeployFTP(context.Background(), art, tgt, cred, nil, nil)
+	if err != nil || res2.InstallCode != res.InstallCode {
+		t.Fatalf("zweiter Deploy: %q %v", res2.InstallCode, err)
 	}
 }
 

@@ -121,7 +121,7 @@ Vorhanden – benutzen, nicht neu bauen:
 ## Abnahme Phase 1 / M1 (alles muss erfüllt sein)
 
 - [ ] 1.1 Migrationen idempotent, Zwei-Prozess-Test grün, `SQLPaymentStore`-Integrationstest
-- [ ] 1.2 `/install` funktioniert, zweiter Aufruf 404, Stripe-Schlüssel aus Settings
+- [x] 1.2 `/install` funktioniert, zweiter Aufruf 404, Stripe-Schlüssel aus Settings
 - [ ] 1.3 Tests gegen Fixation, CSRF, Brute-Force grün
 - [ ] 1.4 Build-Tag-Isolierung der Admin-Templates per Test belegt, in `make check`
 - [ ] 1.5 Startseite Server = CGI (Test)

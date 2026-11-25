@@ -103,7 +103,7 @@ func TestMigrateIdempotent(t *testing.T) {
 			t.Fatalf("Lauf %d: %v", i+1, err)
 		}
 	}
-	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations`); n != 3 {
+	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations WHERE module != 'core'`); n != 3 {
 		t.Fatalf("schema_migrations hat %d Zeilen, erwartet 3", n)
 	}
 	// 002 wurde angewendet: Spalte note existiert
@@ -136,7 +136,7 @@ func TestMigrateFailedMigrationRollsBack(t *testing.T) {
 	if n := countRows(t, db, `SELECT count(*) FROM sqlite_master WHERE name = 't_ok'`); n != 0 {
 		t.Fatal("Teil einer fehlgeschlagenen Migration ist geblieben")
 	}
-	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations`); n != 0 {
+	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations WHERE module != 'core'`); n != 0 {
 		t.Fatal("fehlgeschlagene Migration als angewendet markiert")
 	}
 }
@@ -277,7 +277,7 @@ func TestTwoProcesses(t *testing.T) {
 	if n := countRows(t, db, `SELECT count(DISTINCT note) FROM t_items`); n != procs {
 		t.Fatalf("Zeilen von %d Prozessen, erwartet %d", n, procs)
 	}
-	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations`); n != len(baseFiles) {
+	if n := countRows(t, db, `SELECT count(*) FROM schema_migrations WHERE module != 'core'`); n != len(baseFiles) {
 		t.Fatalf("schema_migrations hat %d Zeilen, erwartet %d", n, len(baseFiles))
 	}
 	// Serialisierung belegt: jeder gelesene Zählerstand kommt genau einmal vor

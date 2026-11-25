@@ -60,6 +60,10 @@ API: `POST /api/builds/{id}/deploy` streamt das Deploy-Log als Server-Sent Event
 
 Das CMS erkennt den CGI-Modus automatisch (`GATEWAY_INTERFACE`) und bietet `/healthz`.
 
+Erstinstallation: `/install` (Seitentitel, Region, GISA-Zahl, Admin-Konto) verlangt einen **Einmal-Code**. Beim SSH-/FTP-Deploy legt die Factory ihn als `install-code` im Datenordner ab und zeigt ihn an; bei der Download-Variante erzeugt das CMS die Datei selbst (Server-Modus meldet den Pfad beim Start). Nach der Installation wird die Datei gelöscht und `/install` antwortet mit 404.
+
+Umgebungsvariablen des CMS: nur `STYRIXA_DATA` (Datenordner) und `STYRIXA_ADDR` (Listen-Adresse). Stripe-Schlüssel stehen seit Session 1.2 in den Settings (`core_settings`, Schlüssel `shop.stripe.*`); `STYRIXA_STRIPE_SECRET_KEY`, `STYRIXA_STRIPE_WEBHOOK_SECRET` und `STYRIXA_STRIPE_API_VERSION` gibt es nicht mehr. Eingabe im Admin folgt mit den Shop-Einstellungen (Phase 5).
+
 ```bash
 cd factory-api
 go mod tidy          # erzeugt go.sum (Checksummen werden gegen sum.golang.org geprüft)

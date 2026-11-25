@@ -492,6 +492,7 @@ export default function StyrixaFactoryConfigurator() {
         setDeployResult({
           release: rel,
           url: dep.publicUrl === "https://" ? "" : dep.publicUrl,
+          installCode: "DEMO-CODE-NURZ-UMTE",
           hints: isSSH
             ? [`App lauscht auf 127.0.0.1:${dep.appPort} – Domain per Caddy/nginx darauf zeigen lassen.`]
             : ["CGI-Modus: ideal für kleine bis mittlere Websites."],
@@ -1153,6 +1154,13 @@ function DeployPanel({ delivery, phase, logs, result, errors, host, onDeploy }) 
               className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-200">
               <Globe className="h-4 w-4" /> Installer öffnen
             </a>
+          )}
+          {result.installCode && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <p className="text-[11px] uppercase tracking-wide text-amber-300/80">Installations-Code für /install</p>
+              <p className="mt-1 select-all font-mono text-base tracking-widest">{result.installCode}</p>
+              <p className="mt-1 text-[11px] text-amber-200/70">Nur einmal gültig. Steht auch in der Datei install-code im Datenordner.</p>
+            </div>
           )}
           {result.hints?.map((h) => (
             <p key={h} className="text-[11px] text-slate-500">{h}</p>

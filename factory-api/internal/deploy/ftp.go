@@ -404,8 +404,30 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 		cleanupProbe()
 		return nil, fmt.Errorf("Datenordner schützen: %w", err)
 	}
-	if c.exists(p(t.DataDir + "/styrixa.db")) {
+	dbExists := c.exists(p(t.DataDir + "/styrixa.db"))
+	if dbExists {
 		log.emit("data", "ok", "Bestehende styrixa.db gefunden – bleibt unverändert")
+	}
+	// Einmal-Code für /install: vorhandenen übernehmen (Deploy vor abgeschlossener
+	// Installation wiederholt), sonst bei Erstinstallation neu anlegen.
+	codePath := p(t.DataDir + "/" + installCodeFile)
+	var installCode string
+	if c.exists(codePath) {
+		if b, err := c.retr(ctx, codePath); err == nil {
+			installCode = parseInstallCode(b)
+		}
+	} else if !dbExists {
+		code, err := newInstallCode()
+		if err != nil {
+			cleanupProbe()
+			return nil, err
+		}
+		if err := c.stor(ctx, codePath, strings.NewReader(code+"\n")); err != nil {
+			cleanupProbe()
+			return nil, fmt.Errorf("Installations-Code: %w", err)
+		}
+		_ = c.chmod("600", codePath) // best effort; der Datenordner ist zusätzlich per .htaccess gesperrt
+		installCode = code
 	}
 
 	// 3. Geprüftes Programm übernehmen (kein zweiter Upload)
@@ -461,8 +483,9 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 		URL:     t.PublicURL,
 		Hints: []string{
 			"CGI-Modus: Das CMS startet pro Anfrage – ideal für kleine bis mittlere Websites. Für viel Traffic SSH/VPS nutzen.",
-			"Erster Aufruf: " + strings.TrimRight(t.PublicURL, "/") + "/install",
+			installHint(installCode, strings.TrimRight(t.PublicURL, "/")+"/install"),
 		},
+		InstallCode: installCode,
 	}, nil
 }
 

@@ -179,6 +179,13 @@ func TestDeploySSHWithRollback(t *testing.T) {
 	if res.Snippets["caddy"] == "" {
 		t.Error("Caddy-Snippet fehlt")
 	}
+	code, _ := os.ReadFile(filepath.Join(home, "styrixa/shared/data", installCodeFile))
+	if res.InstallCode == "" || parseInstallCode(code) != res.InstallCode {
+		t.Fatalf("Installations-Code %q, Datei %q", res.InstallCode, code)
+	}
+	if strings.Contains(strings.Join(lines, "\n"), res.InstallCode) {
+		t.Error("Installations-Code im Deploy-Log")
+	}
 
 	// Zweites Deployment mit kaputtem Binary → Rollback
 	time.Sleep(1100 * time.Millisecond) // neuer Release-Zeitstempel

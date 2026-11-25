@@ -1,0 +1,73 @@
+{{define "head"}}<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>STYRIXA einrichten</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;margin:0;background:#f4f5f7;color:#1c1f24}
+main{max-width:34rem;margin:2rem auto;padding:1.5rem 2rem;background:#fff;border-radius:8px;box-shadow:0 1px 3px #0002}
+h1{font-size:1.4rem;margin-top:0}
+label{display:block;margin-top:1rem;font-weight:600}
+input,select{box-sizing:border-box;width:100%;padding:.5rem;font:inherit;border:1px solid #b8bcc4;border-radius:4px}
+.hint{font-size:.85rem;color:#5a606b;margin:.2rem 0 0}
+.err{color:#b00020;font-size:.9rem;margin:.2rem 0 0}
+.gisa{display:none}
+form:has(option[value="de-AT"]:checked) .gisa{display:block}
+button{margin-top:1.5rem;padding:.6rem 1.2rem;font:inherit;font-weight:600;border:0;border-radius:4px;background:#1c4fd8;color:#fff;cursor:pointer}
+@media (prefers-color-scheme:dark){body{background:#15171a;color:#e6e8eb}main{background:#22252a}input,select{background:#15171a;color:inherit;border-color:#4a4f57}.hint{color:#a0a6b0}.err{color:#ff8a8a}}
+</style>
+</head>
+<body><main>{{end}}
+
+{{define "foot"}}</main></body></html>{{end}}
+
+{{define "form"}}{{template "head"}}
+<h1>STYRIXA einrichten</h1>
+<p>Einmalig: Website-Daten und Admin-Konto anlegen.</p>
+<form method="post" action="/install" novalidate>
+	<label for="code">Installations-Code</label>
+	<input id="code" name="code" value="{{.Form.Code}}" autocomplete="off" spellcheck="false" required>
+	<p class="hint">Zeigt die STYRIXA Factory nach dem Deployment an. Er steht auch in der Datei <code>install-code</code> im Datenordner.</p>
+	{{with .Errors.code}}<p class="err">{{.}}</p>{{end}}
+
+	<label for="title">Seitentitel</label>
+	<input id="title" name="title" value="{{.Form.Title}}" maxlength="200" required>
+	{{with .Errors.title}}<p class="err">{{.}}</p>{{end}}
+
+	<label for="region">Region</label>
+	<select id="region" name="region">
+	{{range .Regions}}<option value="{{.}}"{{if eq . $.Form.Region}} selected{{end}}>{{if eq . "de-AT"}}Österreich{{else if eq . "de-DE"}}Deutschland{{else if eq . "de-CH"}}Schweiz{{else}}{{.}}{{end}}</option>
+	{{end}}</select>
+	{{with .Errors.region}}<p class="err">{{.}}</p>{{end}}
+
+	<div class="gisa">
+		<label for="gisa">GISA-Zahl <span class="hint">(optional)</span></label>
+		<input id="gisa" name="gisa" value="{{.Form.GISA}}" inputmode="numeric" pattern="[0-9]*">
+		<p class="hint">Gewerbeinformationssystem Austria – erscheint im Impressum.</p>
+		{{with .Errors.gisa}}<p class="err">{{.}}</p>{{end}}
+	</div>
+
+	<label for="email">Admin-E-Mail</label>
+	<input id="email" name="email" type="email" value="{{.Form.Email}}" autocomplete="username" required>
+	{{with .Errors.email}}<p class="err">{{.}}</p>{{end}}
+
+	<label for="password">Passwort</label>
+	<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required>
+	<p class="hint">Mindestens 12 Zeichen.</p>
+	{{with .Errors.password}}<p class="err">{{.}}</p>{{end}}
+
+	<label for="password2">Passwort wiederholen</label>
+	<input id="password2" name="password2" type="password" autocomplete="new-password" required>
+	{{with .Errors.password2}}<p class="err">{{.}}</p>{{end}}
+
+	<button type="submit">Einrichten</button>
+</form>
+{{template "foot"}}{{end}}
+
+{{define "done"}}{{template "head"}}
+<h1>Fertig eingerichtet</h1>
+<p>„{{.Form.Title}}“ ist installiert. Das Admin-Konto <strong>{{.Form.Email}}</strong> ist angelegt.</p>
+<p><a href="/admin">Zum Admin-Bereich</a></p>
+{{template "foot"}}{{end}}

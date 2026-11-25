@@ -4,13 +4,13 @@
 package shop
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/julianirmler/styrixa-cms/internal/core"
 )
@@ -44,7 +44,6 @@ func (m *module) Mount(mux *http.ServeMux, d core.Deps) {
 	if d.DB != nil {
 		m.store = SQLPaymentStore{DB: d.DB}
 	}
-	configureProviders()
 	// Admin (Auth-Middleware des Kerns umschließt /admin/*)
 	mux.HandleFunc("GET /admin/shop/orders", todo("Bestellübersicht"))
 	mux.HandleFunc("GET /admin/shop/orders/{number}", todo("Bestelldetail"))
@@ -63,7 +62,7 @@ func (m *module) Mount(mux *http.ServeMux, d core.Deps) {
 }
 
 func (m *module) webhook(w http.ResponseWriter, r *http.Request) {
-	p, ok := providers[r.PathValue("provider")]
+	p, ok := m.provider(r.Context(), r.PathValue("provider"))
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -98,22 +97,41 @@ func (m *module) webhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// configureProviders aktiviert Zahlungsanbieter, deren Zugangsdaten vorhanden sind.
-// Bis der Settings-Store steht (Session 1.2), kommen sie aus der Umgebung.
-func configureProviders() {
-	sk, wh := os.Getenv("STYRIXA_STRIPE_SECRET_KEY"), os.Getenv("STYRIXA_STRIPE_WEBHOOK_SECRET")
-	if sk == "" && wh == "" {
-		return
+// provider liefert den Zahlungsanbieter id. Stripe wird pro Anfrage aus den
+// Settings (core_settings) konfiguriert – kein Zustand im Prozess, im CGI- wie
+// im Server-Modus gilt sofort der gespeicherte Schlüssel. Die früheren
+// Umgebungsvariablen STYRIXA_STRIPE_* gibt es nicht mehr.
+func (m *module) provider(ctx context.Context, id string) (PaymentProvider, bool) {
+	if id == "stripe" && m.d.Settings != nil {
+		if st, err := stripeFromSettings(ctx, m.d.Settings); err != nil {
+			log.Printf("shop: Stripe nicht aktiviert: %v", err) // nie den Schlüssel selbst
+		} else if st != nil {
+			return st, true
+		}
 	}
-	st, err := NewStripe(StripeConfig{SecretKey: sk, WebhookSecret: wh, APIVersion: os.Getenv("STYRIXA_STRIPE_API_VERSION")})
+	p, ok := providers[id]
+	return p, ok
+}
+
+// stripeFromSettings baut den Stripe-Anbieter aus den Settings; nil, wenn kein
+// Schlüssel hinterlegt ist.
+func stripeFromSettings(ctx context.Context, s core.Settings) (*Stripe, error) {
+	sk, err := s.Get(ctx, core.KeyStripeSecretKey)
 	if err != nil {
-		log.Printf("shop: Stripe nicht aktiviert: %v", err)
-		return
+		return nil, err
 	}
-	registerProvider(st)
-	if st.TestMode() {
-		log.Printf("shop: Stripe aktiv (TESTMODUS)")
+	wh, err := s.Get(ctx, core.KeyStripeWebhookSecret)
+	if err != nil {
+		return nil, err
 	}
+	if sk == "" && wh == "" {
+		return nil, nil
+	}
+	ver, err := s.Get(ctx, core.KeyStripeAPIVersion)
+	if err != nil {
+		return nil, err
+	}
+	return NewStripe(StripeConfig{SecretKey: sk, WebhookSecret: wh, APIVersion: ver})
 }
 
 func todo(what string) http.HandlerFunc {

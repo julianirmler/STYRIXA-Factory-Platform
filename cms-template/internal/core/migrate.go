@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"embed"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,18 @@ import (
 	"sort"
 	"strconv"
 )
+
+// CoreID ist die Modul-ID, unter der der Kern seine eigenen Migrationen
+// (Tabellen core_…) in schema_migrations führt.
+const CoreID = "core"
+
+//go:embed migrations/*.sql
+var coreMigrations embed.FS
+
+func coreMigrationsFS() fs.FS {
+	sub, _ := fs.Sub(coreMigrations, "migrations")
+	return sub
+}
 
 // Migrationsdateien heißen NNN_name.sql (z. B. 001_shop.sql).
 var migrationName = regexp.MustCompile(`^(\d{3})_[a-z0-9_]+\.sql$`)
@@ -36,8 +49,9 @@ const schemaMigrationsDDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
 	PRIMARY KEY (module, version)
 )`
 
-// Migrate wendet alle ausstehenden Migrationen der Module an – in der
-// Reihenfolge von mods, innerhalb eines Moduls nach Version.
+// Migrate wendet alle ausstehenden Migrationen an: zuerst die des Kerns
+// (Modul-ID „core“), dann die der Module in der Reihenfolge von mods,
+// innerhalb eines Moduls nach Version.
 //
 // Regeln: Migrationen werden nie geändert, nur angehängt. Eine geänderte,
 // fehlende oder nachträglich eingeschobene Migration ist ein Fehler.
@@ -48,7 +62,10 @@ const schemaMigrationsDDL = `CREATE TABLE IF NOT EXISTS schema_migrations (
 // Gibt es nichts zu tun, kostet ein Aufruf zwei kurze Abfragen – wichtig, weil im
 // CGI-Modus jede Anfrage migriert.
 func Migrate(ctx context.Context, db *sql.DB, mods []Module) error {
-	var all []migration
+	all, err := loadMigrations(CoreID, coreMigrationsFS())
+	if err != nil {
+		return err
+	}
 	for _, m := range mods {
 		ms, err := loadMigrations(m.ID(), m.Migrations())
 		if err != nil {

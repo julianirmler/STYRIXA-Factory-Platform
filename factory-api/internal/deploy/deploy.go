@@ -100,6 +100,10 @@ type Result struct {
 	URL      string            `json:"url"`
 	Hints    []string          `json:"hints,omitempty"`
 	Snippets map[string]string `json:"snippets,omitempty"` // z. B. Caddy/nginx-Konfiguration
+
+	// Einmal-Code für /install; leer, wenn das CMS schon installiert ist.
+	// Geheimnis: nur im Result an das UI, nie ins Deploy-Log (Event).
+	InstallCode string `json:"installCode,omitempty"`
 }
 
 // UnknownIdentityError: Server-Identität ist (noch) nicht bestätigt.

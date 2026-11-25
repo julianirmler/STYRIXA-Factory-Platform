@@ -51,8 +51,15 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `cms-template/go.mod`: `go 1.23` → `go 1.26.0`, `modernc.org/sqlite` v1.63.0
     - Gemessen: Server-Modus mit `mod_media mod_shop` nach Start 14,8 MB RSS
     - Für 5.4 offen: Zahlung auf stornierte Bestellung wird nur markiert, `payment_status` bleibt `open` (siehe `orders_db_test.go`)
-- [ ] **1.2** Settings-Store, `/install`-Wizard (Seitentitel, Region de-AT/DE/CH, GISA-Nummer, Admin-Konto mit bcrypt), Sperre nach Installation; Stripe-Schlüssel aus Settings statt Umgebung
+- [x] **1.2** Settings-Store, `/install`-Wizard (Seitentitel, Region de-AT/DE/CH, GISA-Nummer, Admin-Konto mit bcrypt), Sperre nach Installation; Stripe-Schlüssel aus Settings statt Umgebung
   - *Abnahme:* zweiter Aufruf von `/install` → 404; Handler-Test des Wizards
+  - *Erledigt 2026-11-25, Abweichungen:*
+    - **Install-Schutz per Einmal-Code** (Nutzerentscheidung): `/install` verlangt den Code aus `<Datenordner>/install-code` (80 Bit, Format `ABCD-EFGH-IJKL-MNOP`, Vergleich in konstanter Zeit). SSH-/FTP-Deploy (`factory-api/internal/deploy/installcode.go`) legt ihn bei Erstinstallation an (0600), übernimmt einen vorhandenen bei wiederholtem Deploy und liefert ihn in `Result.InstallCode` (nicht im Deploy-Log); `factory-ui` zeigt ihn an. Ohne Deploy (Download) erzeugt das CMS die Datei selbst; der Server-Modus loggt nur den Pfad. Nach der Installation wird die Datei gelöscht.
+    - Kern-Migrationen werden in `Migrate` immer zuerst angewendet (Modul-ID `core`, reserviert); bestehende Tests zählen `schema_migrations` ohne `core`.
+    - Stripe wird **pro Webhook-Anfrage** aus den Settings gebaut statt einmal in `Mount` (`configureProviders` entfällt, jetzt `stripeFromSettings`): kein Zustand im Prozess, im Server-Modus gilt ein geänderter Schlüssel ohne Neustart. `STYRIXA_STRIPE_*` entfallen (README).
+    - `POST /install` zusätzlich hinter `http.CrossOriginProtection`; Formular mit Passwort-Wiederholung; Passwort max. 72 Bytes (bcrypt-Grenze). GISA-Feld nur bei de-AT sichtbar (CSS `:has`, kein JS), für andere Regionen ignoriert.
+    - Vor der Installation: GET → 303 auf `/install`, andere Methoden → 503 „noch nicht eingerichtet“.
+    - `cms-template/go.mod`: `golang.org/x/crypto` v0.59.0, `golang.org/x/sys` v0.49.0 → v0.50.0
 - [ ] 🟣 **1.3** Login, Sessions (HttpOnly, Secure, SameSite=Lax), CSRF-Token, Login-Rate-Limit in der DB (CGI-tauglich), Passwort-Reset per Mail (`net/smtp`)
   - *Abnahme:* Tests gegen Session-Fixation, CSRF, Brute-Force
 - [ ] **1.4** Admin-Shell mit `html/template` + htmx (ADR-002): Layout, Navigation aus `AdminNav()`, Modul-Templates per `embed` im Modulpaket
