@@ -104,7 +104,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - **Reset-Mail nach der Antwort** (Nutzerentscheidung, offener Punkt aus 1.3 erledigt): Nutzer-Lookup, Token und SMTP laufen per `core.Defer` – die Antwortzeit verrät nicht mehr, ob es das Konto gibt. Der Token wird dafür nirgends zwischengespeichert.
     - `/healthz` = `core.Health`: `SELECT 1` + `core.MigrationsPending` = 0 → `ok`, sonst 503 „nicht bereit“ ohne Details.
     - Logging: `slog`-Text-Handler auf stderr; im CGI-Modus nur `WARN`+ (Apache-Error-Log). `log.Fatal` ersetzt.
-    - **M1-Messung:** macOS arm64, alle Module, nach 200 Anfragen: RSS 22 MB, davon gemeinsam genutzte Systembibliotheken; Physical Footprint 10,2 MB, Go-Heap ≤ 4 MB. Die RSS unter macOS ist nicht vergleichbar, darum misst `cmd/styrixa/rss_test.go` unter Linux (läuft in `make test` in der CI, Grenze 20 MB; eigener CI-Schritt zeigt den Wert). Linux-Wert: _nach dem ersten CI-Lauf eintragen_.
+    - **M1-Messung:** macOS arm64, alle Module, nach 200 Anfragen: RSS 22 MB, davon gemeinsam genutzte Systembibliotheken; Physical Footprint 10,2 MB, Go-Heap ≤ 4 MB. Die RSS unter macOS ist nicht vergleichbar, darum misst `cmd/styrixa/rss_test.go` unter Linux (läuft in `make test` in der CI, Grenze 20 MB; eigener CI-Schritt zeigt den Wert). **Linux (CI, ubuntu-latest, amd64), alle 8 Module, nach 200 Anfragen: RSS 18,9 MB (18 936 KB) < 20 MB ✓**
 
 **M1:** Installierbares Kern-CMS mit Login und Admin-Oberfläche, RAM < 20 MB.
 
