@@ -1,55 +1,47 @@
-// factory-api – Build-Worker und Deploy-Dienst der STYRIXA Factory.
-// Build-Endpunkt folgt; derzeit: Deploy fertiger Builds aus ./builds/<id>/.
+// factory-api – Release-Katalog und Deploy-Dienst der STYRIXA Factory.
+// Liefert vorgebaute, signierte CMS-Pakete aus dem neuesten GitHub-Release
+// (ADR-004) als Download oder per SSH/FTPS-Deploy aus.
 package main
 
 import (
-	"encoding/json"
-	"errors"
+	"context"
 	"flag"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/julianirmler/styrixa-factory-platform/factory-api/internal/api"
-	"github.com/julianirmler/styrixa-factory-platform/factory-api/internal/deploy"
+	"github.com/julianirmler/styrixa-factory-platform/factory-api/internal/catalog"
 )
-
-// dirStore: ./builds/<id>/meta.json + ./builds/<id>/styrixa
-type dirStore struct{ root string }
-
-var reID = regexp.MustCompile(`^bld_[a-f0-9]{8,32}$`)
-
-func (s dirStore) Artifact(id string) (deploy.Artifact, error) {
-	if !reID.MatchString(id) {
-		return deploy.Artifact{}, errors.New("ungültige Build-ID")
-	}
-	dir := filepath.Join(s.root, id)
-	b, err := os.ReadFile(filepath.Join(dir, "meta.json"))
-	if err != nil {
-		return deploy.Artifact{}, err
-	}
-	var a deploy.Artifact
-	if err := json.Unmarshal(b, &a); err != nil {
-		return a, err
-	}
-	a.BinaryPath = filepath.Join(dir, "styrixa")
-	return a, nil
-}
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8090", "Listen-Adresse")
-	builds := flag.String("builds", "./builds", "Ordner mit fertigen Builds")
+	repo := flag.String("repo", "julianirmler/STYRIXA-Factory-Platform", "GitHub-Repository mit den Releases")
+	cache := flag.String("cache", "./cache", "Ordner für geprüfte Pakete")
 	flag.Parse()
+
+	if err := os.MkdirAll(*cache, 0o700); err != nil {
+		slog.Error("cache dir", "err", err)
+		os.Exit(1)
+	}
+	cat := &catalog.Catalog{Repo: *repo, CacheDir: *cache, Token: os.Getenv("GITHUB_TOKEN")}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := cat.Load(ctx); err != nil {
+		slog.Warn("no valid release yet, retrying on demand", "err", err)
+	}
+	cancel()
 
 	mux := http.NewServeMux()
 	// TODO: Kunden-Authentifizierung als Middleware vor /api/*
-	mux.Handle("POST /api/builds/{id}/deploy", &api.DeployHandler{Store: dirStore{root: *builds}})
+	cat.Routes(mux)
+	mux.Handle("POST /api/packages/{id}/deploy", &api.DeployHandler{Store: cat})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("factory-api lauscht auf %s", *addr)
-	log.Fatal(srv.ListenAndServe())
+	slog.Info("factory-api listening", "addr", *addr, "repo", *repo)
+	if err := srv.ListenAndServe(); err != nil {
+		slog.Error("server", "err", err)
+		os.Exit(1)
+	}
 }

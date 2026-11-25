@@ -6,19 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/julianirmler/styrixa-factory-platform/factory-api/internal/catalog"
 	"github.com/julianirmler/styrixa-factory-platform/factory-api/internal/deploy"
 )
 
-// ArtifactStore liefert fertige Builds (wird vom Build-Worker befüllt).
+// ArtifactStore liefert geprüfte Pakete (catalog.Catalog).
 type ArtifactStore interface {
-	Artifact(buildID string) (deploy.Artifact, error)
+	Artifact(ctx context.Context, packageID string) (deploy.Artifact, error)
 }
 
-// DeployHandler: POST /api/builds/{id}/deploy
+// DeployHandler: POST /api/packages/{id}/deploy
 //
 // Request (JSON):
 //
@@ -33,7 +35,7 @@ type ArtifactStore interface {
 //
 // Zugangsdaten leben nur für die Dauer des Requests im Speicher; sie werden
 // weder geloggt noch gespeichert. Der Endpunkt muss hinter der Kunden-
-// Authentifizierung liegen (Build gehört dem eingeloggten Kunden).
+// Authentifizierung liegen.
 type DeployHandler struct {
 	Store ArtifactStore
 
@@ -49,11 +51,6 @@ type deployRequest struct {
 
 func (h *DeployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	art, err := h.Store.Artifact(id)
-	if err != nil {
-		http.Error(w, "Build nicht gefunden", http.StatusNotFound)
-		return
-	}
 	var req deployRequest
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	dec.DisallowUnknownFields()
@@ -66,8 +63,19 @@ func (h *DeployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+	// Paket erst nach der Eingabeprüfung laden (Download + Signaturprüfung)
+	art, err := h.Store.Artifact(r.Context(), id)
+	if errors.Is(err, catalog.ErrNotFound) {
+		http.Error(w, "Paket nicht gefunden", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("package for deploy rejected", "package", id, "err", err)
+		http.Error(w, "Paket konnte nicht geladen oder geprüft werden", http.StatusBadGateway)
+		return
+	}
 	if !h.lock(id) {
-		http.Error(w, "Für diesen Build läuft bereits ein Deployment", http.StatusConflict)
+		http.Error(w, "Für dieses Paket läuft bereits ein Deployment", http.StatusConflict)
 		return
 	}
 	defer h.unlock(id)

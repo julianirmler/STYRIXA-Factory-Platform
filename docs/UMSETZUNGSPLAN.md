@@ -110,8 +110,16 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 ## Phase 2 – Durchstich Factory → M2 (3 Sessions)
 
-- [ ] **2.1** factory-api: Release-Katalog (neuestes GitHub-Release lesen, `SHA256SUMS` + Signatur prüfen), Auswahl Konfiguration → Paket, Download-Endpunkt; `deploy.Artifact` aus dem Paket
+- [x] **2.1** factory-api: Release-Katalog (neuestes GitHub-Release lesen, `SHA256SUMS` + Signatur prüfen), Auswahl Konfiguration → Paket, Download-Endpunkt; `deploy.Artifact` aus dem Paket
   - *Abnahme:* manipuliertes Paket wird abgelehnt; Auswahl in < 1 s
+  - *Erledigt 2026-11-25, Abweichungen/Entscheidungen:*
+    - Neues Paket `factory-api/internal/catalog`. Abnahmetests: `TestTamperedPackageRejected` (Download → 502, Deploy-Artifact → `ErrTampered`, nichts im Cache; manipulierte Cache-Datei wird verworfen) und `TestSelectFast` (Auswahl über HTTP ≈ 60 µs, ohne GitHub-Zugriff). Dazu Tests für manipulierte/fehlende Signatur, fremden Schlüssel, manipulierte `modules.json` (alter Stand bleibt jeweils gültig), ungültige Auswahl und tar-Angriffe (Symlink, Pfade, Zusatzdateien, Größe).
+    - **`modules.json` wird mitsigniert** (Rückfrage ohne Präferenz → Empfehlung): `release.yml` nimmt sie in `SHA256SUMS` auf. Der Katalog lehnt Releases ohne signierte `modules.json` ab – **die vorhandenen Releases `v0.0.1`/`v0.1.0` werden deshalb abgelehnt** (geprüft gegen echtes GitHub: Signatur ok, dann „modules.json nicht signiert“). **Offen: neuen Release taggen (z. B. `v0.2.0`)**, danach `select` + `download` gegen echtes GitHub prüfen.
+    - `ReleasePublicKey` als Kopie in `catalog/release.go` (eigenes Go-Modul); `TestPublicKeyMatchesCMS` vergleicht mit `cms-template/internal/core/release.go`.
+    - Endpunkte: `GET /api/catalog`, `GET /api/packages/select?modules=…&target=os/arch`, `GET /api/packages/{id}/download`; Deploy-Route `POST /api/builds/{id}/deploy` → **`POST /api/packages/{id}/deploy`** (Paket-ID `<key>_<os>_<arch>`, Fetch-URL im UI-Mockup angepasst). `dirStore`/`--builds` entfallen; neu `--repo`, `--cache`, optional `GITHUB_TOKEN`. `api.ArtifactStore.Artifact` bekommt einen `context`; der Deploy-Handler prüft die Eingaben jetzt vor dem Laden des Pakets.
+    - Cache lazy: Ein Paket wird beim ersten Abruf von GitHub geladen (temp → Hash prüfen → rename nach `<cache>/<sha256>.tar.gz`). Bei jedem Abruf wird neu gehasht; das Binary wird für jeden Deploy frisch aus dem geprüften Archiv entpackt. Katalog im Speicher, TTL 10 min, Aktualisierung im Hintergrund, alter Stand gilt bis zum geprüften neuen. Ohne gültigen Katalog höchstens ein GitHub-Versuch pro 10 s.
+    - Nicht umgesetzt: Schutz gegen Downgrade (ein älterer, gültig signierter Release als „latest“). Bei Bedarf mit 6.3 (Updates) klären.
+    - `factory-api` loggt jetzt mit `slog`.
 - [ ] **2.2** `factory-ui` als Vite-Projekt, Module aus `modules.json`, „Build“ = Paket auswählen, echter Download
   - *Abnahme:* Download startet sofort, Paket entspricht der Auswahl
 - [ ] **2.3** Echter Deploy aus dem UI (`MOCK_DEPLOY=false`); einmal auf echtem VPS und echtem Shared-Webspace

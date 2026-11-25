@@ -42,8 +42,9 @@ jobs:
         env:
           STYRIXA_SIGNING_KEY: ${{ secrets.STYRIXA_SIGNING_KEY }}
         run: |
-          cd dist && sha256sum *.tar.gz > SHA256SUMS && cd ..
+          # modules.json ist mitsigniert: die Factory leitet daraus Pflichtmodule und Abhängigkeiten ab
           cp cms-template/modules.json dist/modules.json
+          cd dist && sha256sum *.tar.gz modules.json > SHA256SUMS && cd ..
           (cd cms-template && go run ./tools/sign ../dist/SHA256SUMS)
       - name: GitHub-Release
         env:

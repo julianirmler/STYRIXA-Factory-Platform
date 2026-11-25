@@ -413,9 +413,9 @@ export default function StyrixaFactoryConfigurator() {
       : { ...base, remoteDir: dep.docroot, tls: dep.tls };
   }
 
-  // Echte Anbindung: POST /api/builds/{id}/deploy → Server-Sent Events
+  // Echte Anbindung: POST /api/packages/{id}/deploy → Server-Sent Events
   async function streamDeploy(fp) {
-    const res = await fetch(`/api/builds/${result.id}/deploy`, {
+    const res = await fetch(`/api/packages/${result.id}/deploy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
