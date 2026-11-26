@@ -1,0 +1,56 @@
+<div data-styrixa-template="dashboard-home" class="dash">
+{{with .Data.Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+<p>Willkommen{{with .Email}}, <strong>{{.}}</strong>{{end}}.</p>
+
+<section class="dash-quick" aria-label="Schnellzugriffe">
+	<a class="dash-button" href="/admin/content#title">Neue Seite anlegen</a>
+	<a href="/admin/content">Alle Seiten</a>
+</section>
+
+{{with .Data}}
+<section aria-labelledby="dash-views">
+	<h2 id="dash-views">Seitenaufrufe</h2>
+	<div class="dash-cards">
+		<p class="dash-card"><span class="dash-num">{{.Views7}}</span> letzte 7 Tage</p>
+		<p class="dash-card"><span class="dash-num">{{.Views30}}</span> letzte 30 Tage</p>
+	</div>
+	<table class="dash-days">
+		<caption class="hint">Aufrufe je Tag (UTC)</caption>
+		<tbody>
+		{{- $max := .MaxDay}}
+		{{- range .Days}}
+			<tr><th scope="row">{{.Day}}</th><td><meter min="0" max="{{if $max}}{{$max}}{{else}}1{{end}}" value="{{.Count}}">{{.Count}}</meter></td><td class="dash-count">{{.Count}}</td></tr>
+		{{- end}}
+		</tbody>
+	</table>
+	<p class="hint">Gezählt werden nur Aufrufe veröffentlichter Seiten – ohne Cookies, ohne IP-Adressen, ohne Browser-Kennung. Bots und der Admin-Bereich zählen nicht mit. Gespeichert wird nur die Summe je Tag und Seite.</p>
+</section>
+
+<section aria-labelledby="dash-top">
+	<h2 id="dash-top">Meistbesuchte Seiten (30 Tage)</h2>
+	{{if .Top}}
+	<table>
+		<thead><tr><th>Seite</th><th class="dash-count">Aufrufe</th></tr></thead>
+		<tbody>
+		{{- range .Top}}
+			<tr><td><a href="{{.Path}}"><code>{{.Path}}</code></a></td><td class="dash-count">{{.Count}}</td></tr>
+		{{- end}}
+		</tbody>
+	</table>
+	{{else}}
+	<p class="hint">Noch keine Aufrufe gezählt.</p>
+	{{end}}
+</section>
+
+<section aria-labelledby="dash-status">
+	<h2 id="dash-status">Status</h2>
+	<dl class="dash-status">
+		<dt>Version</dt><dd><code>{{.Version}}</code></dd>
+		<dt>Datenbank</dt><dd>{{.DBSize}}</dd>
+		<dt>Letzte Hintergrundaufgabe</dt>
+		<dd>{{with .Job}}<code>{{.Name}}</code> am {{$.Data.JobAt}}{{if .Error}} – <span class="err">fehlgeschlagen</span>{{else}} – erfolgreich{{end}}{{else}}noch keine{{end}}</dd>
+	</dl>
+</section>
+{{end}}
+<link rel="stylesheet" href="{{asset "dashboard/dashboard.css"}}">
+</div>

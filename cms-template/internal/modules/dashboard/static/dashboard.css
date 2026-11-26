@@ -1,0 +1,16 @@
+/* STYRIXA – Dashboard (Session 3.4). Ergänzt admin.css. */
+.dash section { margin-top: 2rem; }
+.dash-quick { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: 1rem; }
+.dash-button { padding: .5rem 1rem; border-radius: var(--radius); background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
+.dash-cards { display: flex; flex-wrap: wrap; gap: 1rem; }
+.dash-card { margin: 0; padding: 1rem 1.25rem; min-width: 10rem; background: var(--panel); border: 1px solid var(--line);
+	border-radius: var(--radius); color: var(--muted); }
+.dash-num { display: block; font-size: 2rem; font-weight: 700; line-height: 1.2; color: var(--text); }
+.dash-days { margin-top: 1rem; }
+.dash-days caption { text-align: left; }
+.dash-days th { font-weight: 400; white-space: nowrap; }
+.dash-days meter { width: 16rem; max-width: 50vw; }
+.dash-count { text-align: right; font-variant-numeric: tabular-nums; }
+.dash-status { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1.5rem; margin: 0; }
+.dash-status dt { color: var(--muted); }
+.dash-status dd { margin: 0; }

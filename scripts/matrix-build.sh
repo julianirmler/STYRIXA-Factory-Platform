@@ -10,10 +10,12 @@ if [ -n "$out" ]; then mkdir -p "$out"; out=$(cd "$out" && pwd); fi
 goos=${target%/*}; goarch=${target#*/}
 cd "$(dirname "$0")/../cms-template"
 ext=""; [ "$goos" = windows ] && ext=".exe"
+# Version fürs Dashboard (Release: Git-Tag, sonst „dev“)
+ldflags="-s -w -X github.com/julianirmler/styrixa-cms/internal/core.Version=${STYRIXA_VERSION:-dev}"
 n=0
 go run ./tools/matrix | while read -r key tags; do
   bin=$(mktemp -d)/styrixa$ext
-  CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "-s -w" -tags "$tags" -o "$bin" ./cmd/styrixa
+  CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -ldflags "$ldflags" -tags "$tags" -o "$bin" ./cmd/styrixa
   if [ -n "$out" ]; then
     mkdir -p "$out"
     tar -czf "$out/styrixa_${key}_${goos}_${goarch}.tar.gz" -C "$(dirname "$bin")" "styrixa$ext"

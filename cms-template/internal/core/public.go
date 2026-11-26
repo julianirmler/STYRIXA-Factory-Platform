@@ -73,12 +73,30 @@ type PageSource interface {
 	PublicPage(ctx context.Context, path string) (page PublicPage, ok bool, err error)
 }
 
+// Hit ist ein öffentlicher Seitenaufruf für HitCounter. Er enthält bewusst
+// keine IP und keine Cookies; den User-Agent bekommt der Zähler nur zum
+// Erkennen von Bots – speichern darf er ihn nicht.
+type Hit struct {
+	Path      string // Pfad mit führendem „/“, ohne Query
+	UserAgent string
+}
+
+// HitCounter implementiert ein Modul, das öffentliche Seitenaufrufe zählt
+// (Dashboard, Session 3.4). Der Kern meldet nur erfolgreich ausgelieferte
+// Seiten (Startseite und PageSource-Seiten, GET, kein Prefetch) – keine
+// 404, keine Weiterleitungen, nichts unter /admin. Läuft synchron in der
+// Anfrage (ein UPSERT): aufgeschobene Arbeit würde Lazy-Jobs verdrängen.
+type HitCounter interface {
+	CountHit(ctx context.Context, h Hit) error
+}
+
 // Public rendert die öffentlichen Seiten. Templates werden einmal beim Start
 // geparst – sie stammen aus dem Binary, sind also kein veraltender Zustand.
 type Public struct {
 	settings Settings
 	pages    map[string]*template.Template
 	sources  []PageSource
+	counters []HitCounter
 }
 
 // NewPublic baut die Templates aus Kern-Standard und höchstens einem Theme.
@@ -125,6 +143,9 @@ func NewPublic(settings Settings, mods []Module) (*Public, error) {
 		if ps, ok := m.(PageSource); ok {
 			p.sources = append(p.sources, ps)
 		}
+		if hc, ok := m.(HitCounter); ok {
+			p.counters = append(p.counters, hc)
+		}
 	}
 	for _, name := range publicPages {
 		src, origin, err := pick(name)
@@ -154,7 +175,34 @@ func (p *Public) home(w http.ResponseWriter, r *http.Request) {
 	if p.serveSource(w, r, "") {
 		return
 	}
-	p.render(w, r, http.StatusOK, PublicHome, PublicView{})
+	if p.render(w, r, http.StatusOK, PublicHome, PublicView{}) {
+		p.countHit(r)
+	}
+}
+
+// countHit meldet einen erfolgreichen Seitenaufruf an alle HitCounter.
+// Fehler beim Zählen ändern die (schon geschriebene) Antwort nicht.
+func (p *Public) countHit(r *http.Request) {
+	if len(p.counters) == 0 || r.Method != http.MethodGet || isPrefetch(r) {
+		return
+	}
+	h := Hit{Path: r.URL.Path, UserAgent: r.UserAgent()}
+	for _, c := range p.counters {
+		if err := c.CountHit(r.Context(), h); err != nil {
+			slog.Warn("public: Zählung fehlgeschlagen", "err", err)
+		}
+	}
+}
+
+// isPrefetch: Vorab-Laden durch den Browser ist kein Aufruf.
+func isPrefetch(r *http.Request) bool {
+	for _, h := range []string{"Sec-Purpose", "Purpose", "X-Moz", "X-Purpose"} {
+		v := strings.ToLower(r.Header.Get(h))
+		if strings.Contains(v, "prefetch") || strings.Contains(v, "preview") {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Public) catchAll(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +238,9 @@ func (p *Public) serveSource(w http.ResponseWriter, r *http.Request, path string
 			http.Redirect(w, r, to, http.StatusMovedPermanently)
 			return true
 		}
-		p.render(w, r, http.StatusOK, PublicContent, page.View)
+		if p.render(w, r, http.StatusOK, PublicContent, page.View) {
+			p.countHit(r)
+		}
 		return true
 	}
 	return false
@@ -236,15 +286,16 @@ func (p *Public) Preview(w http.ResponseWriter, r *http.Request, v PublicView) {
 }
 
 // render ergänzt v um Sprache, Seitentitel und Status und rendert name.
-func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView) {
+// ok = false: Es wurde stattdessen die 500-Seite ausgeliefert.
+func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView) (ok bool) {
 	cacheControl := "no-cache"
 	if status >= 500 {
 		cacheControl = "no-store"
 	}
-	p.renderCache(w, r, status, name, v, cacheControl)
+	return p.renderCache(w, r, status, name, v, cacheControl)
 }
 
-func (p *Public) renderCache(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView, cacheControl string) {
+func (p *Public) renderCache(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView, cacheControl string) bool {
 	ctx := r.Context()
 	v.Lang, v.Status = Regions[0], status
 	if p.settings != nil {
@@ -252,7 +303,7 @@ func (p *Public) renderCache(w http.ResponseWriter, r *http.Request, status int,
 		if err != nil {
 			slog.Error("public: Settings nicht lesbar", "err", err)
 			p.fail(w, r)
-			return
+			return false
 		}
 		v.SiteTitle = all[KeySiteTitle]
 		if ValidRegion(all[KeySiteRegion]) {
@@ -263,9 +314,10 @@ func (p *Public) renderCache(w http.ResponseWriter, r *http.Request, status int,
 	if err := p.pages[name].ExecuteTemplate(&buf, PublicLayout, v); err != nil {
 		slog.Error("public: Template", "template", name, "err", err)
 		p.fail(w, r)
-		return
+		return false
 	}
 	writeHTML(w, r, status, cacheControl, buf.Bytes())
+	return true
 }
 
 // fail rendert die 500-Seite ohne Settings. Scheitert auch sie (Theme-Fehler),

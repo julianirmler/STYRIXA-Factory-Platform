@@ -282,3 +282,47 @@ func TestPublicPageSource(t *testing.T) {
 		t.Errorf("Kern-Startseite: %d %s", w.Code, w.Body)
 	}
 }
+
+// counterModule zählt wie das Dashboard (HitCounter), hier nur im Speicher.
+type counterModule struct {
+	hits *[]Hit
+}
+
+func (counterModule) ID() string                 { return "dashboard" }
+func (counterModule) Requires() []string         { return nil }
+func (counterModule) Migrations() fs.FS          { return nil }
+func (counterModule) Mount(*http.ServeMux, Deps) {}
+func (counterModule) AdminNav() []NavItem        { return nil }
+
+func (m counterModule) CountHit(_ context.Context, h Hit) error {
+	*m.hits = append(*m.hits, h)
+	return nil
+}
+
+// Session 3.4: Der Kern meldet nur erfolgreich ausgelieferte öffentliche Seiten.
+func TestPublicHitCounter(t *testing.T) {
+	var asked []string
+	var hits []Hit
+	src := pageModule{themeModule: themeModule{id: "content"}, asked: &asked, pages: map[string]PublicPage{
+		"ueber-uns": {View: PublicView{Title: "Über uns"}},
+		"alt":       {RedirectTo: "/ueber-uns"},
+	}}
+	_, h := newTestPublic(t, src, counterModule{hits: &hits})
+	for _, r := range []*http.Request{
+		get("/", "User-Agent", "Browser/1"),
+		get("/ueber-uns?utm=x", "User-Agent", "Browser/2"),
+		get("/ueber-uns", "Sec-Purpose", "prefetch"), // Vorab-Laden
+		httptest.NewRequest("HEAD", "/ueber-uns", nil),
+		get("/alt"),        // 301
+		get("/gibtsnicht"), // 404
+		get("/admin/x"),    // Admin
+		get("/kaputt"),     // 500
+		httptest.NewRequest("POST", "/ueber-uns", nil),
+	} {
+		serve(h, r)
+	}
+	want := []Hit{{Path: "/", UserAgent: "Browser/1"}, {Path: "/ueber-uns", UserAgent: "Browser/2"}}
+	if len(hits) != len(want) || hits[0] != want[0] || hits[1] != want[1] {
+		t.Errorf("gezählt: %+v, erwartet %+v", hits, want)
+	}
+}

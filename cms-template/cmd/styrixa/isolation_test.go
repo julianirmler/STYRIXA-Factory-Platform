@@ -21,9 +21,11 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 		contentTmpl   = "../../internal/modules/content/templates/list.html"
 		editorMarker  = "window.StyrixaBlocks" // eigene Editor.js-Blöcke (Session 3.2)
 		editorJS      = "../../internal/modules/content/static/editor-blocks.js"
+		dashMarker    = `data-styrixa-template="dashboard-home"` // Session 3.4
+		dashTmpl      = "../../internal/modules/dashboard/templates/home.html"
 		coreMarker    = "Dieser Bereich ist noch in Arbeit" // Kern-Template: immer enthalten
 	)
-	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker, editorJS: editorMarker} {
+	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker, editorJS: editorMarker, dashTmpl: dashMarker} {
 		src, err := os.ReadFile(tmpl)
 		if err != nil || !bytes.Contains(src, []byte(marker)) {
 			t.Fatalf("Marker fehlt in %s (Test an das Template anpassen): %v", tmpl, err)
@@ -62,6 +64,10 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 			}
 			if got := bytes.Contains(b, []byte(contentMarker)); got != tc.wantContent {
 				t.Errorf("Content-Template im Binary: %v, erwartet %v", got, tc.wantContent)
+			}
+			// Pflicht-Tags kommen in den Fällen nur gemeinsam vor.
+			if got := bytes.Contains(b, []byte(dashMarker)); got != tc.wantContent {
+				t.Errorf("Dashboard-Template im Binary: %v, erwartet %v", got, tc.wantContent)
 			}
 			if got := bytes.Contains(b, []byte(editorMarker)); got != tc.wantContent {
 				t.Errorf("Editor-Skripte im Binary: %v, erwartet %v", got, tc.wantContent)

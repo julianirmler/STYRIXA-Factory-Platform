@@ -60,6 +60,14 @@ type AdminRenderer interface {
 	Render(w http.ResponseWriter, r *http.Request, status int, p AdminPage)
 }
 
+// AdminHome implementiert höchstens ein Modul (Dashboard, Session 3.4): Es
+// registriert GET /admin selbst, der Kern lässt dann seine schlichte
+// Willkommensseite weg. Ohne ein solches Modul bleibt sie (Tests, Builds ohne
+// mod_dashboard).
+type AdminHome interface {
+	AdminHome()
+}
+
 // AdminPage beschreibt eine Admin-Seite.
 type AdminPage struct {
 	Title    string // Überschrift und Teil des <title>
@@ -92,6 +100,7 @@ type Admin struct {
 	pages    map[string]*template.Template
 	assets   map[string]adminAsset // URL-Dateiname → Inhalt
 	urls     map[string]string     // Quelldateiname → URL
+	home     string                // ID des Moduls mit AdminHome, "" = Kern-Startseite
 }
 
 type adminAsset struct {
@@ -103,6 +112,14 @@ type adminAsset struct {
 func NewAdmin(db *sql.DB, settings Settings, mods []Module) (*Admin, error) {
 	a := &Admin{db: db, settings: settings, pages: map[string]*template.Template{},
 		assets: map[string]adminAsset{}, urls: map[string]string{}}
+	for _, m := range mods {
+		if _, ok := m.(AdminHome); ok {
+			if a.home != "" {
+				return nil, fmt.Errorf("admin: Module %q und %q liefern beide die Admin-Startseite", a.home, m.ID())
+			}
+			a.home = m.ID()
+		}
+	}
 	if err := a.loadAssets(mods); err != nil {
 		return nil, err
 	}
@@ -221,8 +238,10 @@ func (a *Admin) assetURL(name string) (string, error) {
 
 // Mount registriert Startseite und statische Dateien.
 func (a *Admin) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET /admin", a.dashboard)
-	mux.HandleFunc("GET /admin/{$}", a.dashboard)
+	if a.home == "" {
+		mux.HandleFunc("GET /admin", a.dashboard)
+		mux.HandleFunc("GET /admin/{$}", a.dashboard)
+	}
 	mux.HandleFunc("GET "+pathAdminStatic+"{file}", a.static)
 }
 
