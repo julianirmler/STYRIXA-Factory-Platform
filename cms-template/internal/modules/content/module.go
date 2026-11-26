@@ -23,6 +23,12 @@ var migrations embed.FS
 //go:embed templates/*.html
 var templates embed.FS
 
+// Editor.js (vendort, siehe VENDOR.md) und die eigenen Blöcke – ebenfalls nur
+// mit mod_content im Binary.
+//
+//go:embed static/*.js static/*.css
+var static embed.FS
+
 type module struct {
 	d  core.Deps
 	st *store
@@ -37,6 +43,11 @@ func (*module) Migrations() fs.FS {
 
 func (*module) Templates() fs.FS {
 	sub, _ := fs.Sub(templates, "templates")
+	return sub
+}
+
+func (*module) Assets() fs.FS {
+	sub, _ := fs.Sub(static, "static")
 	return sub
 }
 

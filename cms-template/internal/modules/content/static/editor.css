@@ -1,0 +1,38 @@
+/* STYRIXA – Block-Editor (Session 3.2). Ergänzt admin.css; das CSS der
+   vendorten Editor.js-Dateien fügen diese selbst ein (mit CSP-Nonce). */
+.editor { max-width: 48rem; }
+.editor .label { margin: 1rem 0 .25rem; font-weight: 600; }
+.editorjs { padding: 1rem 1rem 1rem 3.5rem; background: var(--panel); border: 1px solid var(--line);
+	border-radius: var(--radius); color: var(--text); }
+.editor-bar { display: flex; align-items: center; gap: 1rem; margin-top: 1rem; }
+.editor-bar button[disabled] { opacity: .6; cursor: progress; }
+
+/* Editor.js-Popover und Werkzeugleisten im Dunkelmodus lesbar halten */
+@media (prefers-color-scheme: dark) {
+	.editorjs .ce-popover, .editorjs .ce-inline-toolbar, .editorjs .ce-conversion-toolbar,
+	.editorjs .ce-settings {
+		color: #1c1f24;
+	}
+	.editorjs .ce-toolbar__plus, .editorjs .ce-toolbar__settings-btn { color: var(--text); }
+	.editorjs .ce-toolbar__plus:hover, .editorjs .ce-toolbar__settings-btn:hover { background: var(--line); }
+	.editorjs ::selection { background: #3d5a99; }
+	.editorjs .ce-block--selected .ce-block__content { background: #2d3a57; }
+}
+
+/* Eigene Blöcke */
+.styrixa-block { display: grid; gap: .5rem; padding: .75rem; margin: .5rem 0;
+	border: 1px dashed var(--line); border-radius: var(--radius); }
+.styrixa-block__title { margin: 0; font-size: .8rem; font-weight: 600; text-transform: uppercase;
+	letter-spacing: .04em; color: var(--muted); }
+.styrixa-block .styrixa-input { max-width: none; }
+.styrixa-field { min-height: 2.4rem; outline: none; }
+.styrixa-field:empty::before { content: attr(data-placeholder); color: var(--muted); }
+.styrixa-field--strong { font-weight: 600; }
+.styrixa-faq__list { display: grid; gap: .75rem; }
+.styrixa-faq__item { display: grid; gap: .4rem; padding-bottom: .75rem; border-bottom: 1px solid var(--line); }
+.styrixa-btn { justify-self: start; padding: .3rem .75rem; font-size: .9rem; font-weight: 400;
+	background: none; color: var(--accent); border: 1px solid var(--line); }
+.styrixa-warn { margin: 0; font-size: .85rem; color: var(--danger); }
+.styrixa-warn[hidden], .styrixa-image__preview[hidden] { display: none; }
+[aria-invalid="true"] { border-color: var(--danger); }
+.styrixa-image__preview { max-width: 100%; max-height: 16rem; justify-self: start; border-radius: var(--radius); }

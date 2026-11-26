@@ -2,9 +2,11 @@ package core
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"html/template"
@@ -42,6 +44,16 @@ type AdminTemplates interface {
 	Templates() fs.FS
 }
 
+// AdminAssets implementiert ein Modul, das statische Admin-Dateien (JS, CSS)
+// mitbringt – per embed im Modulpaket, also nur im Binary, wenn das Modul
+// gewählt ist (ADR-002). Assets() liefert Dateien auf oberster Ebene; im
+// Template heißen sie „<modul-id>/<datei>“, z. B. {{asset "content/editor.js"}}.
+// Sie liegen unter /admin/static/ (wie die Kern-Dateien ohne Login abrufbar –
+// nichts Geheimes) mit Inhalts-Hash im Namen.
+type AdminAssets interface {
+	Assets() fs.FS
+}
+
 // AdminRenderer rendert eine Seite im Admin-Layout. Module erhalten ihn über
 // Deps.Admin; er ist nil, wenn kein Admin gemountet ist (Tests).
 type AdminRenderer interface {
@@ -53,6 +65,10 @@ type AdminPage struct {
 	Title    string // Überschrift und Teil des <title>
 	Template string // „<modul-id>/<datei>“
 	Data     any    // im Template als .Data
+	// StyleNonce erlaubt <style>-Elemente mit der Nonce .StyleNonce (pro
+	// Anfrage neu) und data:-Bilder, z. B. für vendorte Skripte, die ihr CSS
+	// selbst einfügen (Editor.js). Skripte bleiben auf 'self' beschränkt.
+	StyleNonce bool
 }
 
 // AdminPlaceholder liefert einen Handler für eine Seite, die noch nicht gebaut
@@ -87,7 +103,7 @@ type adminAsset struct {
 func NewAdmin(db *sql.DB, settings Settings, mods []Module) (*Admin, error) {
 	a := &Admin{db: db, settings: settings, pages: map[string]*template.Template{},
 		assets: map[string]adminAsset{}, urls: map[string]string{}}
-	if err := a.loadAssets(); err != nil {
+	if err := a.loadAssets(mods); err != nil {
 		return nil, err
 	}
 
@@ -147,21 +163,50 @@ func (a *Admin) addPages(layout *template.Template, id string, fsys fs.FS) error
 
 // loadAssets legt alle statischen Dateien unter einem Namen mit Inhalts-Hash ab
 // (admin.css → admin.3f2a…9c.css). Damit dürfen Browser sie für immer cachen.
-func (a *Admin) loadAssets() error {
-	entries, err := adminFS.ReadDir("admin/static")
+// Modul-Dateien heißen im Template „<id>/<datei>“, in der URL „<id>-<datei>“.
+func (a *Admin) loadAssets(mods []Module) error {
+	core, _ := fs.Sub(adminFS, "admin/static")
+	if err := a.addAssets(core, ""); err != nil {
+		return err
+	}
+	for _, m := range mods {
+		am, ok := m.(AdminAssets)
+		if !ok {
+			continue
+		}
+		if fsys := am.Assets(); fsys != nil {
+			if err := a.addAssets(fsys, m.ID()); err != nil {
+				return fmt.Errorf("admin: Dateien von %s: %w", m.ID(), err)
+			}
+		}
+	}
+	return nil
+}
+
+func (a *Admin) addAssets(fsys fs.FS, id string) error {
+	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		body, err := adminFS.ReadFile("admin/static/" + e.Name())
+		if e.IsDir() {
+			continue
+		}
+		body, err := fs.ReadFile(fsys, e.Name())
 		if err != nil {
 			return err
 		}
 		sum := sha256.Sum256(body)
 		ext := path.Ext(e.Name())
-		url := strings.TrimSuffix(e.Name(), ext) + "." + hex.EncodeToString(sum[:5]) + ext
+		key, url := e.Name(), strings.TrimSuffix(e.Name(), ext)+"."+hex.EncodeToString(sum[:5])+ext
+		if id != "" {
+			key, url = id+"/"+key, id+"-"+url
+		}
+		if _, dup := a.assets[url]; dup {
+			return fmt.Errorf("doppelte Datei %s", url)
+		}
 		a.assets[url] = adminAsset{body: body, ctype: mime.TypeByExtension(ext)}
-		a.urls[e.Name()] = pathAdminStatic + url
+		a.urls[key] = pathAdminStatic + url
 	}
 	return nil
 }
@@ -205,6 +250,7 @@ type adminNavView struct {
 
 type adminView struct {
 	SiteTitle, Title, Email, CSRF, HtmxConfig string
+	StyleNonce                                string // nur bei AdminPage.StyleNonce
 	Nav                                       []adminNavView
 	Data                                      any
 }
@@ -222,6 +268,11 @@ func (a *Admin) Render(w http.ResponseWriter, r *http.Request, status int, p Adm
 		return
 	}
 	v := adminView{Title: p.Title, CSRF: CSRFToken(ctx), HtmxConfig: htmxConfig, Data: p.Data}
+	csp := adminCSP
+	if p.StyleNonce {
+		v.StyleNonce = newNonce()
+		csp = adminCSPWithStyleNonce(v.StyleNonce)
+	}
 	if id, ok := CurrentUser(ctx); ok {
 		if err := a.db.QueryRowContext(ctx, `SELECT email FROM core_users WHERE id = ?`, id).Scan(&v.Email); err != nil {
 			slog.Error("admin: Benutzer nicht lesbar", "err", err)
@@ -257,7 +308,21 @@ func (a *Admin) Render(w http.ResponseWriter, r *http.Request, status int, p Adm
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	h.Set("Content-Security-Policy", adminCSP)
+	h.Set("Content-Security-Policy", csp)
 	w.WriteHeader(status)
 	w.Write(buf.Bytes())
+}
+
+// newNonce liefert 128 Bit Zufall, Base64url ohne Padding – pro Anfrage neu
+// (CSP-Nonce; keine Zeichen, die html/template in Attributen maskiert).
+func newNonce() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b) // crypto/rand scheitert nicht (Go ≥ 1.24 bricht sonst ab)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// adminCSPWithStyleNonce: wie adminCSP, zusätzlich <style> mit dieser Nonce
+// und data:-Bilder (vendortes CSS nutzt SVG-Masken als data:-URL).
+func adminCSPWithStyleNonce(nonce string) string {
+	return adminCSP + "; style-src 'self' 'nonce-" + nonce + "'; img-src 'self' data:"
 }

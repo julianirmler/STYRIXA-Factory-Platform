@@ -14,7 +14,7 @@ import (
 )
 
 // Admin (minimal, Session 3.1): Liste, Anlegen, Einstellungen, Entwurf per
-// JSON, Veröffentlichen, Zurückziehen, Löschen. Das Editor-UI folgt in 3.2.
+// JSON, Veröffentlichen, Zurückziehen, Löschen; Block-Editor seit 3.2.
 // Login und CSRF prüft der Kern (Auth.Require) für alles unter /admin/*.
 
 const msgInternal = "Interner Fehler – bitte später erneut versuchen."
@@ -46,6 +46,19 @@ type editView struct {
 	Page    pageRow
 	Parents []option
 	Error   string
+	Editor  editorView
+}
+
+// editorView füttert den Block-Editor (Session 3.2). Body geht als
+// data-Attribut an die Seite (html/template escapt), nicht als Inline-Skript.
+type editorView struct {
+	Title     string
+	Body      string // Editor.js-JSON
+	RevID     int64
+	HTMLMode  bool // neueste Revision im HTML-Modus – Editor folgt in 3.3
+	AllowRaw  bool // Raw-HTML-Block nur für Admins (serverseitig geprüft in Validate)
+	DraftURL  string
+	Published bool
 }
 
 func row(p page) pageRow {
@@ -153,8 +166,18 @@ func (m *module) renderEdit(w http.ResponseWriter, r *http.Request, id int64, co
 			parents = append(parents, o)
 		}
 	}
+	d, err := m.st.latestDraft(r.Context(), id)
+	if err != nil {
+		code, msg = status(err)
+	}
+	ev := editorView{Title: d.Title, Body: d.Body, RevID: d.RevID, HTMLMode: d.Format == FormatHTML,
+		AllowRaw: core.IsAdmin(r.Context()), DraftURL: "/admin/content/pages/" + strconv.FormatInt(id, 10) + "/draft",
+		Published: p.Status == statusPublished}
+	if ev.Title == "" {
+		ev.Title = p.Title
+	}
 	m.d.Admin.Render(w, r, code, core.AdminPage{Title: "Seite · " + p.Title, Template: "content/page.html",
-		Data: editView{Page: row(p), Parents: parents, Error: msg}})
+		Data: editView{Page: row(p), Parents: parents, Error: msg, Editor: ev}, StyleNonce: true})
 }
 
 func (m *module) edit(w http.ResponseWriter, r *http.Request) {

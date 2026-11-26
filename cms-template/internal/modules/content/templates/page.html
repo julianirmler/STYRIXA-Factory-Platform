@@ -3,7 +3,25 @@
 {{with .Data.Page}}
 <p><a href="/admin/content">← Alle Seiten</a></p>
 <p>Status: <strong>{{.Status}}</strong>{{with .PublicURL}} · <a href="{{.}}">öffentlich ansehen</a>{{end}} · zuletzt geändert {{.Updated}}</p>
-<p class="hint">Der Block-Editor folgt mit dem nächsten Update. Bis dahin speichert die Schnittstelle <code>POST /admin/content/pages/{{.ID}}/draft</code> Entwürfe als JSON.</p>
+{{end}}
+
+{{with .Data.Editor}}
+{{if .HTMLMode}}
+<p class="notice">Diese Seite ist im HTML-Modus gespeichert. Der HTML-Editor folgt mit dem nächsten Update – der Block-Editor würde den Inhalt überschreiben und ist deshalb ausgeblendet.</p>
+{{else}}
+<div id="editor" class="editor" data-draft-url="{{.DraftURL}}" data-csrf="{{$.CSRF}}" data-body="{{.Body}}"{{if .AllowRaw}} data-allow-raw="1"{{end}}>
+	<label for="page-title">Titel</label>
+	<input id="page-title" name="title" value="{{.Title}}" maxlength="200" required>
+	<p class="label" id="editor-label">Inhalt</p>
+	<div id="editorjs" class="editorjs" aria-labelledby="editor-label"></div>
+	<noscript><p class="err">Der Block-Editor braucht JavaScript.</p></noscript>
+	<div class="editor-bar">
+		<button type="button" id="editor-save">Entwurf speichern</button>
+		<span id="editor-status" class="hint" role="status" aria-live="polite"></span>
+	</div>
+	<p class="hint">Blöcke mit „+“ einfügen, über das Menü ⋮⋮ neben einem Block verschieben oder löschen. Speichern auch mit Strg/⌘ + S. Öffentlich wird erst, was veröffentlicht ist.</p>
+</div>
+{{end}}
 {{end}}
 
 <form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/settings">
@@ -24,7 +42,7 @@
 </form>
 
 {{if .Data.Page.Published}}
-<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish">
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish" data-save-first>
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<button type="submit">Aktuellen Entwurf veröffentlichen</button>
 </form>
@@ -33,7 +51,7 @@
 	<button type="submit" class="link">Veröffentlichung zurückziehen</button>
 </form>
 {{else}}
-<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish">
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish" data-save-first>
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<button type="submit">Veröffentlichen</button>
 </form>
@@ -42,4 +60,18 @@
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<button type="submit" class="link">Seite löschen</button>
 </form>
+{{if not .Data.Editor.HTMLMode}}
+<link rel="stylesheet" href="{{asset "content/editor.css"}}">
+<script src="{{asset "content/editor-nonce.js"}}" nonce="{{.StyleNonce}}" defer></script>
+<script src="{{asset "content/editorjs-2.31.7.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-header-2.8.9.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-list-2.0.9.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-quote-2.7.6.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-delimiter-1.4.2.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-marker-1.4.0.umd.js"}}" defer></script>
+<script src="{{asset "content/editorjs-inline-code-1.5.2.umd.js"}}" defer></script>
+{{if .Data.Editor.AllowRaw}}<script src="{{asset "content/editorjs-raw-2.5.1.umd.js"}}" defer></script>{{end}}
+<script src="{{asset "content/editor-blocks.js"}}" defer></script>
+<script src="{{asset "content/editor.js"}}" defer></script>
+{{end}}
 </div>

@@ -113,7 +113,7 @@ Vorhanden – benutzen, nicht neu bauen:
 ## Abnahme Phase 3 (alles muss erfüllt sein)
 
 - [x] 3.1 Renderer-Test je Blocktyp, XSS-Suite grün, Entwurf nicht öffentlich, Slug-Redirect 301
-- [ ] 3.2 Seite ohne Code im Editor bau- und sortierbar
+- [x] 3.2 Seite ohne Code im Editor bau- und sortierbar
 - [ ] 3.3 Auto-Save, Vorschau, Revision wiederherstellbar, kein Datenverlust
 - [ ] 3.4 Dashboard ohne Cookies/personenbezogene Daten
 - [ ] 3.5 Smoke-Test in CI

@@ -19,9 +19,11 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 		shopTmpl      = "../../internal/modules/shop/templates/placeholder.html"
 		contentMarker = `data-styrixa-template="content-list"`
 		contentTmpl   = "../../internal/modules/content/templates/list.html"
+		editorMarker  = "window.StyrixaBlocks" // eigene Editor.js-Blöcke (Session 3.2)
+		editorJS      = "../../internal/modules/content/static/editor-blocks.js"
 		coreMarker    = "Dieser Bereich ist noch in Arbeit" // Kern-Template: immer enthalten
 	)
-	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker} {
+	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker, editorJS: editorMarker} {
 		src, err := os.ReadFile(tmpl)
 		if err != nil || !bytes.Contains(src, []byte(marker)) {
 			t.Fatalf("Marker fehlt in %s (Test an das Template anpassen): %v", tmpl, err)
@@ -60,6 +62,9 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 			}
 			if got := bytes.Contains(b, []byte(contentMarker)); got != tc.wantContent {
 				t.Errorf("Content-Template im Binary: %v, erwartet %v", got, tc.wantContent)
+			}
+			if got := bytes.Contains(b, []byte(editorMarker)); got != tc.wantContent {
+				t.Errorf("Editor-Skripte im Binary: %v, erwartet %v", got, tc.wantContent)
 			}
 		})
 	}

@@ -462,3 +462,21 @@ func rollback(tx *sql.Tx, err *error) {
 		_ = tx.Rollback()
 	}
 }
+
+// draft ist die neueste Revision einer Seite (= Entwurf).
+type draft struct {
+	RevID         int64
+	Title, Format string
+	Body          string
+}
+
+// latestDraft liefert die neueste Revision; ohne Revision ein leeres Dokument.
+func (s *store) latestDraft(ctx context.Context, id int64) (draft, error) {
+	d := draft{Format: FormatBlocks, Body: emptyDoc}
+	err := s.db.QueryRowContext(ctx, `SELECT id, title, format, body FROM content_revisions
+		WHERE page_id = ? ORDER BY id DESC LIMIT 1`, id).Scan(&d.RevID, &d.Title, &d.Format, &d.Body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return d, nil
+	}
+	return d, err
+}
