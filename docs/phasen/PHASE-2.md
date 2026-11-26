@@ -123,6 +123,45 @@ In `docs/UMSETZUNGSPLAN.md` bei 2.3: Hoster (Name, Tarif), Plattform, CGI ja/nei
 
 ---
 
+## Session 2.4 – PHP-Brücke für Webspaces ohne CGI (Ziel: easyname)
+
+**Anlass:** 26.11.2026 – easyname-Webhosting lehnt `Options +ExecCGI` ab (HTTP 500), CGI ist dort nicht möglich. Entscheidung: ADR-012. **Modell: Sonnet.**
+**Abnahme:** CMS läuft auf easyname-Webhosting über die PHP-Brücke; `/install` abgeschlossen, Login ok; `styrixa-data/*`, Binary und Konfiguration liefern 403/404; Brücken-Integrationstest in CI zeigt Server-Modus = Brücke.
+
+### 0. Hoster-Probe (Nutzer, vor jedem Code)
+Der Nutzer lädt `tools/hoster-probe/styrixa-probe.php` unter zufälligem Namen auf die easyname-Test-Subdomain, öffnet sie im Browser, kopiert die Ausgabe in den Chat und **löscht die Datei**. Ergebnis im Plan notieren.
+- `proc_open: ja` **und** `exec_own_binary: ja` → weiter mit Schritt 1.
+- sonst **anhalten**: Tarif ungeeignet. Nutzer informieren (Alternativen: easyname vServer mit SSH-Deployment, Webspace mit CGI) – keine Umgehung bauen.
+- `sqlite_wal: NEIN` → anhalten, Nutzer fragen (betrifft auch CGI-Hosting, offen seit 1.1).
+
+### 1. Die Brücke (`factory-api/internal/deploy/bridge/index.php`, per `embed`)
+- Platzhalter für **absoluten** Binary- und Datenpfad, beim Deploy ersetzt (`var_export`, kein String-Basteln). Keine anderen Eingaben im Befehl.
+- `proc_open([$bin], [0=>pipe r, 1=>pipe w, 2=>pipe w], $pipes, $cwd, $env)` – **Array-Form, keine Shell**.
+- `$env`: `GATEWAY_INTERFACE=CGI/1.1`, `SERVER_PROTOCOL`, `REQUEST_METHOD`, `REQUEST_URI`, `QUERY_STRING`, `CONTENT_TYPE`, `CONTENT_LENGTH`, `SERVER_NAME`, `SERVER_PORT`, `HTTPS`, `REMOTE_ADDR`, `PATH_INFO` (= Pfad ohne Query), `SCRIPT_NAME=""`, alle Anfrage-Header als `HTTP_*` (aus `getallheaders()` bzw. `$_SERVER`), `STYRIXA_DATA`, `STYRIXA_MODE=cgi`, `PATH=/usr/bin:/bin`. **Keine** PHP-Umgebung durchreichen.
+- Body: `php://input` blockweise nach stdin kopieren, dann stdin schließen. Antwort: Kopfzeilen bis zur Leerzeile lesen → `Status:` per `http_response_code`, übrige per `header(..., false)` (mehrere `Set-Cookie` erhalten), dann Body mit `fpassthru` streamen. stderr begrenzt (64 KB) in `error_log`.
+- Fehlerfälle: Binary fehlt/startet nicht → schlichte 503-Seite auf Deutsch, Details nur ins Log. `set_time_limit` auf den Wert des Hosters belassen.
+- Höchstens ca. 100 Zeilen, ohne Funktionen außer `proc_open`, `stream_*`, `header`.
+
+### 2. Ablage auf dem Webspace
+- Liegt der Document-Root **unterhalb** des FTP-Startordners (z. B. `/html` bzw. Subdomain-Ordner), kommen Binary und Daten in einen Geschwisterordner **außerhalb** des Webs: `<ftp-root>/styrixa-app/<site>/bin/styrixa` und `…/data/`. Sonst Fallback in `styrixa-data/` mit Sperr-`.htaccess` (wie bisher).
+- `.htaccess` im Document-Root: Anfragen, die keine Datei sind, an `index.php` (mod_rewrite); falls Rewrite nicht erlaubt: `FallbackResource /index.php`. Sperre für `styrixa-data/`, `*.db*`, `install-code`.
+- Absolute Pfade ermittelt die Brücke im Prüfordner selbst (`__DIR__`) und meldet sie an den Deploy zurück – nicht raten.
+
+### 3. Hoster-Check erweitern (`ftp.go`)
+Reihenfolge: Testdatei erreichbar → **CGI** (wie bisher) → wenn Diagnose „kein CGI“: **Brücke im Prüfordner** (Brücke + Binary hochladen, `…/ping` über Rewrite/Fallback → Brücke → Binary `/healthz`) → sonst Diagnose mit Empfehlung SSH/vServer. Erst nach bestandenem Check wird die Website angefasst. `Result.Mode` = `cgi` | `php-bridge`, im UI angezeigt.
+Rollback und Wiederholungs-Deploy wie im CGI-Modus (vorheriges Binary behalten, Daten und Install-Code bleiben).
+
+### 4. Tests
+- Go-Integrationstest: `php -S 127.0.0.1:<port> -t <tmp>` mit der echten Brücke + echtem CMS-Binary (`go build`), Vergleich mit dem Server-Modus wie in `cmd/styrixa/public_test.go`: GET/HEAD, POST-Formular (Login), Redirect, mehrere `Set-Cookie`, 404, 413/große Bodys, Query-Strings, Umlaute im Pfad. Übersprungen, wenn `php` fehlt; **in CI vorhanden** (ubuntu-latest).
+- Sicherheitstests: Header-Injection (`\r\n` in Headern) erreicht die Antwort nicht; Pfad-/Shell-Zeichen in der URL ändern den Befehl nicht; Binary und Datenordner per HTTP nicht abrufbar.
+- `ftp_test.go`: Hoster-Check wählt CGI, wenn vorhanden; sonst Brücke; sonst Diagnose (Fake-Apache-Varianten).
+
+### 5. Echter Test auf easyname
+Deploy auf die leere Test-Subdomain → `/install` → Login. Prüfen und notieren: Modus, Antwortzeit (`curl -w '%{time_total}'` für `/` und `/admin`), 403/404 für Daten und Binary, zweites Deploy behält Daten. Bei Fehlern Ursache mit Test im Code beheben.
+**Hinweis für den Nutzer:** In den easyname-AGB bzw. beim Support klären, ob das Ausführen eigener Programme über PHP im Tarif erlaubt ist und welche Prozess-/CPU-Grenzen gelten.
+
+---
+
 ## Abnahme Phase 2 / M2 (alles muss erfüllt sein)
 
 - [x] 2.1 Katalog: manipuliertes Paket abgelehnt, Auswahl < 1 s
@@ -132,14 +171,17 @@ In `docs/UMSETZUNGSPLAN.md` bei 2.3: Hoster (Name, Tarif), Plattform, CGI ja/nei
 - [x] 2.2 `factory-api --ui` liefert das UI mit CSP aus (Go-Test), `node --test` für `src/lib/` grün, `make ui` in CI
 - [ ] 2.3 Deploy ohne Simulation inkl. Fingerprint-Dialog und Install-Code-Anzeige
 - [ ] 2.3 VPS: `/install` abgeschlossen, Login ok, zweites Deploy behält Daten
-- [ ] 2.3 Webspace: Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403
+- [ ] 2.3 Webspace (mit CGI, falls vorhanden): Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403
+- [ ] 2.4 Hoster-Probe auf easyname dokumentiert
+- [ ] 2.4 easyname über PHP-Brücke: `/install` abgeschlossen, Login ok, Daten/Binary nicht abrufbar, Modus `php-bridge` im UI
+- [ ] 2.4 Brücken-Integrationstest (PHP-Server vs. Server-Modus) und Sicherheitstests in CI
 - [ ] `make check` und CI grün
 
 ## Abschluss jeder Session
 
 1. Session in `docs/UMSETZUNGSPLAN.md` abhaken, Abweichungen und Messwerte notieren.
 2. Committen (eine Session = ein oder wenige Commits), pushen, CI grün.
-3. Nach Session 2.3: Release `v0.3.0` taggen (M2), in `CLAUDE.md` „Aktuelle Phase“ auf `@docs/phasen/PHASE-3.md` umstellen (Datei existiert ggf. noch nicht – Nutzer informieren).
+3. Nach Session 2.4: Release `v0.3.0` taggen (M2), in `CLAUDE.md` „Aktuelle Phase“ auf `@docs/phasen/PHASE-3.md` umstellen (Datei existiert ggf. noch nicht – Nutzer informieren).
 
 ## Bekannte Stolpersteine
 
@@ -153,6 +195,8 @@ In `docs/UMSETZUNGSPLAN.md` bei 2.3: Hoster (Name, Tarif), Plattform, CGI ja/nei
 | `systemctl --user` fehlt / Dienst stoppt nach Logout | eigener Benutzer statt root, `sudo loginctl enable-linger <benutzer>`; sonst greift der nohup-Fallback (Hinweis im Ergebnis) |
 | Plattform-Fehler beim SSH-Deploy | VPS ist arm64 (z. B. ARM-Instanzen) → `linux/arm64` wählen |
 | FTPS-Zertifikat passt nicht zur Domain | normal bei Shared Hosting – Fingerprint mit dem Hoster-Panel vergleichen, dann bestätigen |
-| Hoster-Check: „mod_rewrite fehlt“ / „kein CGI“ | Tarif kann das nicht → SSH-Weg oder anderer Tarif; im Plan notieren |
+| Hoster-Check: „kein CGI“ | ab 2.4 automatisch PHP-Brücke; scheitert auch sie → SSH/vServer |
+| Hoster-Check: „mod_rewrite fehlt“ | Brücke nutzt `FallbackResource`; sonst Tarif ungeeignet |
+| Brücke: Antwort leer / 500 | `error_log` des Hosters prüfen; meist `proc_open` gesperrt oder Binary ohne Ausführungsrecht (`SITE CHMOD 755`) |
 | `SITE CHMOD` nicht unterstützt | Rechte 755 für `styrixa.cgi` im Hoster-Panel setzen, Deploy wiederholen |
 | Port 8080 auf dem VPS belegt | im UI anderen internen App-Port wählen |

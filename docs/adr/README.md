@@ -10,11 +10,12 @@ Leitlinie für alle Entscheidungen: **die günstigste Lösung, die das Risiko vo
 | 004 | Builds: vorgebaut statt Build-Server | ✅ entschieden, umgesetzt (`release.yml`) |
 | 005 | Hintergrundaufgaben | ✅ entschieden |
 | 006 | Updates der Kunden-CMS | ✅ entschieden |
-| 007 | Zahlungen und Rechtliches im Shop | ✅ entschieden, Stripe umgesetzt |
-| 008 | Shared-Hoster ohne CGI | ✅ entschieden, umgesetzt (Hoster-Check) |
+| 007 | Zahlungen und Rechtliches im Shop | ✅ entschieden (ergänzt 25.11.2026: AT/EU, Produktarten, Widerrufsbutton, Labels), Stripe umgesetzt |
+| 008 | Shared-Hoster ohne CGI | ✅ entschieden, umgesetzt (Hoster-Check); ergänzt durch ADR-012 |
 | 009 | Nur reine Go-Abhängigkeiten | ✅ entschieden, umgesetzt (`make cgo`, CI) |
 | 010 | Tests | ✅ entschieden |
 | 011 | Factory-Konten und Abrechnung | ⚠️ Geschäftsmodell offen (einzige offene Entscheidung) |
+| 012 | PHP-Brücke für Webspaces ohne CGI (z. B. easyname) | ✅ entschieden 26.11.2026, Umsetzung Session 2.4 – vorbehaltlich Hoster-Probe |
 
 ---
 
@@ -77,7 +78,11 @@ Leitlinie für alle Entscheidungen: **die günstigste Lösung, die das Risiko vo
 - **Nur Stripe Checkout.** Karten, EPS, Klarna, Apple/Google Pay **und PayPal** laufen darüber (PayPal ist bei Stripe für Unternehmen in AT/DE/CH verfügbar, Freischaltung im Stripe-Dashboard). Keine eigene PayPal-Integration.
 - Kartendaten berühren nie den Server (gehostete Bezahlseite) → minimaler PCI-Aufwand für Kunden.
 - Vorkasse bleibt als zweite Zahlart (null Code beim Anbieter).
-- **Rechtstexte** (AGB, Widerrufsbelehrung, Datenschutz, Impressum) sind normale Seiten im Content-Modul. Der Shop prüft nur, dass sie verknüpft sind, und zeigt die Pflicht-Checkbox im Checkout. Inhalt liefert der Betreiber (z. B. WKO-Muster).
+- **Rechtstexte** (AGB, Widerrufsbelehrung, Datenschutz, Impressum, Versand & Zahlung, ggf. Barrierefreiheit) sind normale Seiten im Content-Modul mit Versionierung. **Widerrufsbelehrung und Muster-Widerrufsformular** werden aus dem gesetzlichen Muster (FAGG Anhang I) **vorbefüllt**; AGB und Datenschutz liefert der Betreiber. Das Impressum wird aus den Betreiberangaben erzeugt.
+- **Rahmen (ergänzt 25.11.2026):** Verkauf an Verbraucher in **Österreich und der EU**; Produktarten **Waren, Downloads und Dienstleistungen**; **altersbeschränkte Waren** (16+/18+) möglich. Anforderungen mit Quellen: `docs/shop/RECHTSRAHMEN-AT.md`.
+- **Shop-Bereitschaftsprüfung:** Der Checkout bleibt gesperrt, bis alle Pflichtangaben und -seiten vorhanden sind – das CMS macht einen unvollständigen Shop technisch unmöglich, statt nur zu warnen.
+- **Widerrufsbutton (§ 13a FAGG)** und **EU-Gewährleistungs-/Garantielabel** sind Pflicht-Bestandteile, keine Theme-Optionen: Themes müssen den Hook ausgeben.
+- **EU-Steuern:** bei aktivem OSS Steuersatz des Lieferlands; **einheitliche Bruttopreise** in allen Ländern (die USt wird je Zielland herausgerechnet) – einfachste Preisdarstellung, kein Preis-Umrechnen nach Adresseingabe. Kleinunternehmerregelung als Schalter.
 - Steuersätze und 30-Tage-Tiefstpreis: konfigurierbar bzw. automatisch aus dem Preisverlauf (vorhanden).
 - Rechnung: festes Layout mit den Pflichtangaben einer Rechnung nach UStG. PDF-Erzeugung mit einem **eigenen minimalen PDF-Schreiber** (ca. 150 Zeilen, Standardschrift Helvetica mit WinAnsi-Kodierung – deckt ä ö ü ß € ab). Grund: Die verbreiteten Go-Bibliotheken der fpdf-Linie sind archiviert; eine Rechnung braucht nur Text und eine Tabelle.
 - Im Admin ein deutlicher Hinweis: Steuer- und Rechtswerte sind vom Betreiber zu prüfen; STYRIXA leistet keine Rechts- oder Steuerberatung.
@@ -89,6 +94,8 @@ Leitlinie für alle Entscheidungen: **die günstigste Lösung, die das Risiko vo
 **Entscheidung (umgesetzt):** Das FTP-Deployment macht **zuerst einen Hoster-Check** in einem Prüfordner (`_styrixa-check-…`): CGI direkt, dann über mod_rewrite. Erst wenn beides funktioniert, wird die Website angefasst. Bei Fehlschlag bleibt der Webspace unverändert, der Kunde erhält eine konkrete Diagnose („kein CGI“ bzw. „mod_rewrite fehlt“) und die Empfehlung SSH. Das geprüfte Programm wird übernommen, kein zweiter Upload.
 
 **Warum:** Ersetzt die manuell gepflegte Hoster-Kompatibilitätsliste durch eine automatische Prüfung bei jedem Kunden.
+
+**Ergänzung 26.11.2026:** Fehlt CGI, prüft der Hoster-Check als Nächstes die PHP-Brücke (ADR-012) und wählt sie automatisch. Erst wenn auch sie nicht geht, kommt die Diagnose mit Empfehlung SSH/vServer.
 
 ## 009 – Nur reine Go-Abhängigkeiten
 
@@ -105,3 +112,19 @@ Erlaubte Abhängigkeiten: `modernc.org/sqlite`, `golang.org/x/crypto`. Sonst nur
 **Entscheidung:** Login per **Magic-Link** (E-Mail mit Einmal-Link, keine Passwörter, kein Passwort-Reset). Abrechnung über **Stripe Checkout** – der Code aus dem Shop wird wiederverwendet.
 
 **Offen (deine Entscheidung):** Geschäftsmodell – kostenlos für STYRIXA-Kunden, Einmalpreis pro CMS oder Abo (inkl. Updates). Günstigste Variante zum Start: **nur für STYRIXA-Kunden, Freischaltung von Hand** – dann entfällt Session 6.4 vorerst ganz.
+
+## 012 – PHP-Brücke für Webspaces ohne CGI (z. B. easyname)
+
+**Anlass:** Test 26.11.2026 auf easyname-Webhosting: `.htaccess` mit `Options +ExecCGI` liefert HTTP 500 – der Tarif führt kein CGI aus. Viele österreichische Shared-Hoster bieten nur PHP.
+
+**Entscheidung:** Ist CGI nicht verfügbar, wird das CMS über eine **PHP-Brücke** betrieben: eine kleine `index.php` (ca. 80 Zeilen, keine Anwendungslogik) startet das unveränderte Go-Binary pro Anfrage per `proc_open` und spricht mit ihm genau das CGI-Protokoll, das das CMS schon kann (`GATEWAY_INTERFACE`).
+
+- Die Brücke startet **nur das eine, beim Deploy festgelegte Binary** (absoluter Pfad, `proc_open` mit Array → keine Shell, keine Eingaben im Befehl). Anfrage-Kopfzeilen werden als `HTTP_*` übergeben, der Body per stdin, die Antwort (Status, Header, Body) zurückgegeben.
+- Binary und Datenordner liegen **außerhalb des Document-Roots**, wenn der FTP-Zugang das erlaubt; sonst im per `.htaccess` gesperrten `styrixa-data/`.
+- `.htaccess` leitet alle Anfragen, die keine Datei sind, an `index.php` (mod_rewrite, sonst `FallbackResource`).
+- Der Hoster-Check wählt automatisch: **CGI → PHP-Brücke → Diagnose**. Die Brücke wird wie CGI vorher im Prüfordner getestet; die Website bleibt bis dahin unberührt.
+- Alle Regeln aus CLAUDE.md Nr. 4 (CGI-tauglich) gelten unverändert; es entsteht **kein PHP-Code mit Logik**, keine zweite Codebasis.
+
+**Voraussetzung (vor der Umsetzung prüfen):** `tools/hoster-probe/styrixa-probe.php` meldet auf dem Webspace `proc_open: ja`, `exec_own_binary: ja` und SQLite-WAL nicht `NEIN`. Schlägt die Probe fehl, ist dieser Tarif nicht geeignet → **easyname vServer** (SSH-Deployment, schon fertig) oder ein Webspace mit CGI.
+
+**Warum:** Günstigste Lösung, die die verbreitetsten PHP-Webspaces abdeckt, ohne das CMS in PHP neu zu schreiben. Kosten: ein Prozessstart pro Anfrage über PHP (vergleichbar mit CGI).

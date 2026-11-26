@@ -5,7 +5,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 **Prinzip:** Günstigste Lösung, die das Risiko beseitigt. Erst ein Durchstich (fertiges CMS wird ausgewählt, deployt, installiert), dann die Module. Jede Session ist eine abgeschlossene Claude-Code-Aufgabe mit Tests als Abnahme und endet mit Commit und `/clear`.
 
 **Legende:** 🟣 = Opus (nur wo Sicherheit oder Architektur es verlangen), sonst Sonnet.
-**Umfang:** **34 Sessions** (vorher 44), ca. **0,6–1,0 Mio. Output-Tokens**, ca. 55–95 Mio. verarbeitet (überwiegend Cache).
+**Umfang:** **40 Sessions** (vorher 44, dann 34; +5 Shop nach AT/EU-Recht am 25.11.2026, +1 PHP-Brücke für easyname am 26.11.2026), ca. **0,7–1,15 Mio. Output-Tokens**, ca. 65–110 Mio. verarbeitet (überwiegend Cache).
 
 **Startprompt für jede Session:**
 > Lies CLAUDE.md, docs/adr/README.md und docs/UMSETZUNGSPLAN.md. Setze Session X.Y um. Abnahme laut Plan, `make check` grün, Session abhaken, committen.
@@ -108,7 +108,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 **M1:** Installierbares Kern-CMS mit Login und Admin-Oberfläche, RAM < 20 MB.
 
-## Phase 2 – Durchstich Factory → M2 (3 Sessions)
+## Phase 2 – Durchstich Factory → M2 (4 Sessions)
 
 - [x] **2.1** factory-api: Release-Katalog (neuestes GitHub-Release lesen, `SHA256SUMS` + Signatur prüfen), Auswahl Konfiguration → Paket, Download-Endpunkt; `deploy.Artifact` aus dem Paket
   - *Abnahme:* manipuliertes Paket wird abgelehnt; Auswahl in < 1 s
@@ -134,6 +134,9 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `go run ./factory-api/cmd/factory-api` aus dem Repo-Wurzelordner geht nicht (kein `go.work`) – aus `factory-api/` starten (`CLAUDE.md` angepasst).
 - [ ] **2.3** Echter Deploy aus dem UI (`MOCK_DEPLOY=false`); einmal auf echtem VPS und echtem Shared-Webspace
   - *Abnahme:* CMS läuft auf beiden, `/install` erreichbar
+  - *Stand 26.11.2026:* FTPS-Upload zu easyname läuft (Fixes: TLS-Handshake auf dem Datenkanal vor `150`, sauberes Schließen gegen „450 Transfer aborted“, Prüfung der Website-URL vor dem CGI-Test). Ergebnis: **easyname-Webhosting erlaubt kein CGI** → Webspace-Abnahme wandert nach 2.4.
+- [ ] **2.4** PHP-Brücke für Webspaces ohne CGI (ADR-012), Ziel **easyname**: Hoster-Probe, `index.php`-Brücke, Hoster-Check wählt CGI → PHP-Brücke → Diagnose, Binary/Daten außerhalb des Document-Roots
+  - *Abnahme:* CMS läuft auf easyname-Webhosting über die Brücke, `/install` abgeschlossen, `styrixa-data/*` und das Binary nicht abrufbar; Brücken-Test (PHP-Server) = Server-Modus in CI
 
 **M2:** Ende-zu-Ende: auswählen → deployen → installieren.
 
@@ -161,16 +164,30 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 **M3:** Alle 8 Module fertig, alle 36 Kombinationen gebaut und getestet.
 
-## Phase 5 – Shop komplett (5 Sessions)
+## Phase 5 – Shop komplett nach österreichischem und EU-Recht (10 Sessions)
 
-*(Kann direkt nach Phase 3 vorgezogen werden – dann 4.1 Media vorher.)*
+Anforderungskatalog mit Quellen: [`docs/shop/RECHTSRAHMEN-AT.md`](shop/RECHTSRAHMEN-AT.md) – die `R-…`-IDs sind die Abnahmekriterien. Rahmen (Entscheidung 25.11.2026): Verkauf an Verbraucher in **Österreich und der EU**, **Waren, Downloads und Dienstleistungen**, **altersbeschränkte Waren** möglich, gesetzliche Muster **vorbefüllt**. Voraussetzung: Phase 3 (Pflichtseiten sind Content-Seiten) und 4.1 Media.
 
-- [ ] **5.1** Produkt- und Kategorie-Admin, Varianten, Lager, Preisverlauf
-- [ ] **5.2** Katalog- und Produktseiten, JSON-LD, Grundpreis, 30-Tage-Tiefstpreis bei Rabatten
-- [ ] **5.3** Warenkorb, Checkout (`POST /shop/kasse` → Stripe `Start` oder Vorkasse), Danke-Seite („Zahlung wird geprüft“), Lager bei Zahlung reduzieren
-- [ ] **5.4** Rechnungs-PDF (eigener minimaler PDF-Schreiber, ADR-007), fortlaufende Nummern, Gutschriften, Bestellmails, Erstattung per Klick im Admin
-- [ ] **5.5** Rechtstexte verknüpfen + Pflicht-Checkbox, Steuer-Admin, Hinweis „vom Betreiber zu prüfen“
-- *Abnahme Phase 5:* Testbestellung end-to-end im Stripe-Testmodus (inkl. PayPal/EPS über Stripe), Rechnung korrekt je Steuersatz
+- [ ] **5.1** Rechtsrahmen im Kern: Betreiberangaben (ECG/UGB/GewO/MedienG) in den Settings, erzeugtes Impressum, AStG-Angabe, Kleinunternehmer-/Kleinstunternehmen-Schalter, Pflichtseiten-Register mit **vorbefüllter Widerrufsbelehrung + Muster-Widerrufsformular**, Pflicht-Hooks im Theme (Impressum-Link, Widerrufsbutton), **Shop-Bereitschaftsprüfung** (Checkout gesperrt, solange etwas fehlt), Versionierung der Rechtstexte
+  - *Abnahme:* R-IMP-1…5, R-INF-4, R-SYS-1…3; Test: kein OS-Plattform-Link irgendwo
+- [ ] **5.2** Produkt- und Kategorie-Admin: Produkttypen Ware/Download/Dienstleistung, Varianten, Lager, Preisverlauf, Grundpreis, Lieferzeit (≤ 30 Tage), Altersgrenze 16/18, Herstellergarantie (Dauer, Marke, Modell), Speditionsware, private Download-Dateien im Datenordner
+  - *Abnahme:* alle Felder mit Validierung; Download-Dateien nicht öffentlich abrufbar (Server- und CGI-Modus)
+- [ ] **5.3** Katalog- und Produktseiten: Preis „inkl. USt.“ bzw. Kleinunternehmer-Hinweis, Versandkosten-Link, Grundpreis, 30-Tage-Tiefstpreis, Lieferzeit, **EU-Gewährleistungslabel** (zentral) und **Garantielabel** (je Produkt), Alters- und Widerrufs-Hinweise je Produkttyp, JSON-LD
+  - *Abnahme:* R-PRE-1…4, R-LBL-1/2/4, R-INF-1/5/6
+- [ ] 🟣 **5.4** Steuern EU/OSS: Steuersätze aller EU-Länder mit Gültigkeit (Startwerte, im Admin pflegbar), Satz nach Lieferland bei aktivem OSS, **einheitliche Bruttopreise** in allen Ländern (USt je Zielland herausgerechnet), Kleinunternehmerregelung, OSS-Export je Quartal (CSV)
+  - *Abnahme:* R-STE-1/2; tabellengetriebene Tests AT/DE/IT × Waren/Lebensmittel × OSS an/aus × Kleinunternehmer
+- [ ] 🟣 **5.5** Warenkorb und Checkout (FAGG § 8): Liefergebiete + Zahlungsarten zu Beginn, Rechnungsadresse EU-weit (Geoblocking), Zusammenfassung **unmittelbar** über dem Button **„zahlungspflichtig bestellen“**, nur aktive Checkboxen (AGB, Download-Zustimmung, Dienstleistungs-Verlangen, Altersbestätigung) mit Zeitstempel, Stripe/Vorkasse, Danke-Seite („Zahlung wird geprüft“), Lager bei Zahlung
+  - *Abnahme:* R-BST-1…9, R-INF-8; Test: keine vorausgewählte Checkbox, Button-Text exakt
+- [ ] **5.6** Bestellbestätigung auf dauerhaftem Datenträger: Mail mit Firmenangaben und Labels, PDF „Vertragsunterlagen“ (Bestellung, AGB-Version, Widerrufsbelehrung, Muster-Formular, abgegebene Zustimmungen) über den eigenen PDF-Schreiber; Downloads erst nach Zahlung über signierte, ablaufende Links
+  - *Abnahme:* R-BEST-1…3, R-LBL-3, R-IMP-3; Mail-Versand CGI-tauglich
+- [ ] **5.7** Widerrufsbutton (§ 13a FAGG): hervorgehobener Button **„Vertrag widerrufen“** ohne Login, Formular nur mit Name/Bestellnummer/E-Mail (+ optional Artikel, Grund), **„Widerruf bestätigen“**, **sofortige** neutrale Eingangsbestätigung mit Datum und Uhrzeit, Admin-Posteingang mit Status und Mitteilung an den Kunden
+  - *Abnahme:* R-WID-1…7; Handler-Tests inkl. Gastbestellung und Teilwiderruf
+- [ ] **5.8** Rechnungen und Gutschriften: Pflichtangaben UStG, fortlaufende Nummern, Satz je Zielland (OSS), Kleinunternehmer-Hinweis, Gutschrift bei Erstattung, Erstattung per Klick (Stripe), offener Punkt aus 1.1 (Zahlung auf stornierte Bestellung)
+  - *Abnahme:* R-RE-1; Rechnung korrekt je Steuersatz und Land
+- [ ] **5.9** Kundendaten und DSGVO: Gastbestellung als Standard, Kundenkonto optional mit `mod_users`, Auskunft (JSON-Export), Anonymisierung unter Wahrung der 7-Jahres-Aufbewahrung, Textbausteine für die Datenschutzerklärung (Stripe, Versand)
+  - *Abnahme:* R-DSG-1…3, R-BAR-1
+- [ ] **5.10** Compliance-Abnahme: Testbestellungen je Produkttyp (Ware AT, Ware DE mit OSS, Download, Dienstleistung, Wein 18+) im Stripe-Testmodus inkl. EPS/PayPal, Widerruf, Erstattung, Gutschrift; automatischer Prüftest aller `R-…`; Betreiber-Checkliste aus dem Katalog in die Kunden-Doku übernehmen
+  - *Abnahme:* alle `R-…` grün oder begründet als Betreiberpflicht markiert
 
 ## Phase 6 – Factory produktreif → M4 (4 Sessions)
 
@@ -193,9 +210,9 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 |---|---|---|
 | AVIF/WebP ohne CGO | Umwandlung im Browser (WebP, Safari: JPEG), kein AVIF, kein Server-Code – ADR-001 | ✅ entschieden |
 | Block-Editor als Zeitfresser | Editor.js statt Eigenbau, Admin mit htmx statt React – ADR-002/003 | ✅ entschieden |
-| Shared-Hoster ohne CGI/.htaccess | Automatischer Hoster-Check vor jeder Änderung, klare Diagnose – ADR-008 | ✅ umgesetzt + getestet |
+| Shared-Hoster ohne CGI/.htaccess | Automatischer Hoster-Check vor jeder Änderung; ohne CGI automatisch PHP-Brücke (easyname), sonst klare Diagnose – ADR-008/012 | ✅ CGI umgesetzt, PHP-Brücke in 2.4 |
 | Abhängigkeiten nicht reines Go | `make cgo` + CI-Build aller Kombinationen mit `CGO_ENABLED=0` – ADR-009 | ✅ umgesetzt + getestet |
-| Rechtliches im Shop | Nur Stripe Checkout (inkl. PayPal), Rechtstexte als Seiten, Pflicht-Checkbox, klarer Betreiber-Hinweis – ADR-007 | ✅ entschieden |
+| Rechtliches im Shop | Anforderungskatalog `docs/shop/RECHTSRAHMEN-AT.md` (FAGG inkl. Widerrufsbutton, EU-Labels, PrAG, ECG/UGB/MedienG, Geoblocking, OSS, BaFG, DSGVO), Shop-Bereitschaftsprüfung sperrt unvollständige Shops, vorbefüllte gesetzliche Muster, Betreiber-Checkliste – ADR-007 | ✅ entschieden |
 | Build-Server (Kosten, Sicherheit, Aufwand) | Alle Kombinationen per GitHub Actions vorgebaut und signiert – ADR-004 | ✅ umgesetzt |
 | Archivierte PDF-Bibliothek | Eigener minimaler PDF-Schreiber – ADR-007 | ✅ entschieden |
 | Browser-Test-Pflege | Ein Smoke-Test statt Playwright-Suite – ADR-010 | ✅ entschieden |
