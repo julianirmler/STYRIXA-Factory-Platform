@@ -69,6 +69,9 @@ func (m *module) Mount(mux *http.ServeMux, d core.Deps) {
 	mux.HandleFunc("POST /admin/content/pages/{id}/publish", m.action((*store).publish))
 	mux.HandleFunc("POST /admin/content/pages/{id}/unpublish", m.action((*store).unpublish))
 	mux.HandleFunc("POST /admin/content/pages/{id}/delete", m.remove)
+	mux.HandleFunc("GET /admin/content/pages/{id}/preview", m.preview)
+	mux.HandleFunc("POST /admin/content/pages/{id}/format", m.switchFormat)
+	mux.HandleFunc("POST /admin/content/pages/{id}/revisions/{rev}/restore", m.restore)
 	// Öffentliche Seiten liefert der Kern über PageSource (PublicPage).
 }
 

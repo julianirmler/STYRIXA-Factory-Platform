@@ -36,3 +36,10 @@
 .styrixa-warn[hidden], .styrixa-image__preview[hidden] { display: none; }
 [aria-invalid="true"] { border-color: var(--danger); }
 .styrixa-image__preview { max-width: 100%; max-height: 16rem; justify-self: start; border-radius: var(--radius); }
+
+/* HTML-Modus und Revisionen (Session 3.3) */
+.editor textarea.code { max-width: none; min-height: 24rem; font: .9rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	tab-size: 2; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.editor .notice[hidden] { display: none; }
+.revisions .actions { display: flex; gap: .75rem; align-items: baseline; white-space: nowrap; }
+.revisions .actions form { margin: 0; }

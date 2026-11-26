@@ -204,39 +204,187 @@ func (s *store) create(ctx context.Context, title string, parentID, author int64
 }
 
 func addRevision(ctx context.Context, q querier, pageID int64, title, format, body string, author, now int64) (int64, error) {
+	return insertRevision(ctx, q, pageID, title, format, body, author, now, false)
+}
+
+func insertRevision(ctx context.Context, q querier, pageID int64, title, format, body string, author, now int64, auto bool) (int64, error) {
 	var a any
 	if author != 0 {
 		a = author
 	}
-	res, err := q.ExecContext(ctx, `INSERT INTO content_revisions (page_id, title, format, body, author_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, pageID, title, format, body, a, now)
+	res, err := q.ExecContext(ctx, `INSERT INTO content_revisions (page_id, title, format, body, author_id, created_at, saved_at, autosave)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, pageID, title, format, body, a, now, now, auto)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-// saveDraft speichert eine neue Revision. Validate muss vorher gelaufen sein.
-func (s *store) saveDraft(ctx context.Context, id int64, title, format, body string, author int64) (rev int64, err error) {
-	if title, err = checkTitle(title); err != nil {
-		return 0, err
+// autosaveWindow: so lange überschreibt ein Auto-Save die eigene letzte
+// Auto-Save-Revision; danach beginnt eine neue (≈ 6 Revisionen je Stunde).
+const autosaveWindow = 10 * 60
+
+// draftSave beschreibt einen Speichervorgang (POST …/draft).
+type draftSave struct {
+	Title, Format, Body string
+	Author              int64
+	Base                int64 // Revision, auf der der Editor aufbaut; 0 = unbekannt
+	Auto                bool
+}
+
+// newerRevision ist eine Revision, die seit Base von anderswo gespeichert
+// wurde. Sie wird trotzdem überholt (letzte Revision gewinnt), der Editor
+// bekommt einen Hinweis.
+type newerRevision struct {
+	ID          int64
+	AuthorID    int64
+	AuthorEmail string
+	SavedAt     int64
+}
+
+// saveDraft speichert eine Revision. Validate muss vorher gelaufen sein.
+// Auto-Saves fassen sich zusammen (siehe autosaveWindow), wenn die neueste
+// Revision ein Auto-Save desselben Autors ist, auf dem der Editor aufbaut, und
+// sie nicht veröffentlicht ist.
+func (s *store) saveDraft(ctx context.Context, id int64, d draftSave) (rev int64, newer *newerRevision, err error) {
+	title, err := checkTitle(d.Title)
+	if err != nil {
+		return 0, nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer rollback(tx, &err)
-	if _, err = getPage(ctx, tx, id); err != nil {
-		return 0, err
+	p, err := getPage(ctx, tx, id)
+	if err != nil {
+		return 0, nil, err
+	}
+	var last struct {
+		id, author, created int64
+		auto                bool
+	}
+	err = tx.QueryRowContext(ctx, `SELECT r.id, IFNULL(r.author_id, 0), r.created_at, r.autosave FROM content_revisions r
+		WHERE r.page_id = ? ORDER BY r.id DESC LIMIT 1`, id).Scan(&last.id, &last.author, &last.created, &last.auto)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, nil, err
+	}
+	if d.Base != 0 && last.id != 0 && last.id != d.Base {
+		newer = &newerRevision{ID: last.id, AuthorID: last.author}
+		if err = tx.QueryRowContext(ctx, `SELECT r.saved_at, IFNULL(u.email, '') FROM content_revisions r
+			LEFT JOIN core_users u ON u.id = r.author_id WHERE r.id = ?`, last.id).Scan(&newer.SavedAt, &newer.AuthorEmail); err != nil {
+			return 0, nil, err
+		}
 	}
 	now := s.unix()
-	if rev, err = addRevision(ctx, tx, id, title, format, body, author, now); err != nil {
-		return 0, err
+	if d.Auto && newer == nil && last.auto && last.author != 0 && last.author == d.Author &&
+		last.id != p.PubRev && now-last.created < autosaveWindow {
+		rev = last.id
+		_, err = tx.ExecContext(ctx, `UPDATE content_revisions SET title = ?, format = ?, body = ?, saved_at = ? WHERE id = ?`,
+			title, d.Format, d.Body, now, rev)
+	} else {
+		rev, err = insertRevision(ctx, tx, id, title, d.Format, d.Body, d.Author, now, d.Auto)
+	}
+	if err != nil {
+		return 0, nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE content_pages SET title = ?, updated_at = ? WHERE id = ?`, title, now, id); err != nil {
+		return 0, nil, err
+	}
+	return rev, newer, tx.Commit()
+}
+
+// revision ist eine Zeile der Revisionsliste.
+type revision struct {
+	ID          int64
+	Title       string
+	Format      string
+	Body        string
+	AuthorEmail string
+	SavedAt     int64
+	Auto        bool
+}
+
+// revisions liefert die Revisionen einer Seite, neueste zuerst (ohne Body).
+func (s *store) revisions(ctx context.Context, id int64) ([]revision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id, r.title, r.format, IFNULL(u.email, ''), r.saved_at, r.autosave
+		FROM content_revisions r LEFT JOIN core_users u ON u.id = r.author_id
+		WHERE r.page_id = ? ORDER BY r.id DESC LIMIT 200`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []revision
+	for rows.Next() {
+		var r revision
+		if err := rows.Scan(&r.ID, &r.Title, &r.Format, &r.AuthorEmail, &r.SavedAt, &r.Auto); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+var errRevNotFound = &InputError{Msg: "Diese Revision gibt es nicht (mehr)."}
+
+// revision liefert eine Revision der Seite id samt Body.
+func (s *store) revision(ctx context.Context, id, revID int64) (revision, error) {
+	var r revision
+	err := s.db.QueryRowContext(ctx, `SELECT id, title, format, body, saved_at, autosave FROM content_revisions
+		WHERE id = ? AND page_id = ?`, revID, id).Scan(&r.ID, &r.Title, &r.Format, &r.Body, &r.SavedAt, &r.Auto)
+	if errors.Is(err, sql.ErrNoRows) {
+		return r, errRevNotFound
+	}
+	return r, err
+}
+
+// restore legt eine neue Revision mit dem Inhalt von revID an – die Historie
+// bleibt vollständig. Die Rolle prüft Validate wie beim Speichern: Raw-HTML
+// und HTML-Modus darf nur ein Admin zurückholen.
+func (s *store) restore(ctx context.Context, id, revID, author int64, admin bool) (int64, error) {
+	old, err := s.revision(ctx, id, revID)
+	if err != nil {
 		return 0, err
 	}
-	return rev, tx.Commit()
+	if err := Validate(old.Body, old.Format, admin); err != nil {
+		return 0, err
+	}
+	rev, _, err := s.saveDraft(ctx, id, draftSave{Title: old.Title, Format: old.Format, Body: old.Body, Author: author})
+	return rev, err
+}
+
+// switchFormat wechselt den Entwurf in den Block- oder HTML-Modus (nur
+// Admin, prüft der Handler). Blöcke → HTML übernimmt den gerenderten Inhalt;
+// HTML → Blöcke beginnt leer (der HTML-Stand bleibt als Revision).
+func (s *store) switchFormat(ctx context.Context, id int64, format string, author int64) error {
+	if format != FormatBlocks && format != FormatHTML {
+		return badInput("Unbekanntes Format %q.", format)
+	}
+	if _, err := s.page(ctx, id); err != nil {
+		return err
+	}
+	d, err := s.latestDraft(ctx, id)
+	if err != nil || d.Format == format {
+		return err
+	}
+	body := emptyDoc
+	if format == FormatHTML {
+		h, err := Render(d.Body, d.Format)
+		if err != nil {
+			return err
+		}
+		body = string(h)
+	}
+	title := d.Title
+	if title == "" {
+		p, err := s.page(ctx, id)
+		if err != nil {
+			return err
+		}
+		title = p.Title
+	}
+	_, _, err = s.saveDraft(ctx, id, draftSave{Title: title, Format: format, Body: body, Author: author})
+	return err
 }
 
 // publish macht die neueste Revision öffentlich.

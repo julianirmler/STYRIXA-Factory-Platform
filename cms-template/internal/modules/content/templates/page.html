@@ -6,25 +6,47 @@
 {{end}}
 
 {{with .Data.Editor}}
-{{if .HTMLMode}}
-<p class="notice">Diese Seite ist im HTML-Modus gespeichert. Der HTML-Editor folgt mit dem nächsten Update – der Block-Editor würde den Inhalt überschreiben und ist deshalb ausgeblendet.</p>
+{{if and .HTMLMode (not .AllowRaw)}}
+<p class="notice">Diese Seite ist im HTML-Modus gespeichert. Bearbeiten können sie nur Administratoren – frühere Block-Fassungen lassen sich unter „Revisionen“ wiederherstellen.</p>
+<p><a href="{{.PageURL}}/preview" target="_blank" rel="noopener">Vorschau</a></p>
 {{else}}
-<div id="editor" class="editor" data-draft-url="{{.DraftURL}}" data-csrf="{{$.CSRF}}" data-body="{{.Body}}"{{if .AllowRaw}} data-allow-raw="1"{{end}}>
+<div id="editor" class="editor" data-mode="{{if .HTMLMode}}html{{else}}blocks{{end}}" data-draft-url="{{.DraftURL}}" data-csrf="{{$.CSRF}}" data-rev="{{.RevID}}"{{if not .HTMLMode}} data-body="{{.Body}}"{{end}}{{if .AllowRaw}} data-allow-raw="1"{{end}}>
 	<label for="page-title">Titel</label>
 	<input id="page-title" name="title" value="{{.Title}}" maxlength="200" required>
+	{{- if .HTMLMode}}
+	<label for="html-body">HTML</label>
+	<textarea id="html-body" class="code" rows="24" spellcheck="false" autocapitalize="off" autocomplete="off">{{.Body}}</textarea>
+	<p class="hint">HTML-Modus: Der Code wird ungefiltert veröffentlicht. Nur Administratoren können ihn speichern.</p>
+	{{- else}}
 	<p class="label" id="editor-label">Inhalt</p>
 	<div id="editorjs" class="editorjs" aria-labelledby="editor-label"></div>
 	<noscript><p class="err">Der Block-Editor braucht JavaScript.</p></noscript>
+	{{- end}}
 	<div class="editor-bar">
 		<button type="button" id="editor-save">Entwurf speichern</button>
+		<a href="{{.PageURL}}/preview" target="_blank" rel="noopener" id="editor-preview">Vorschau</a>
 		<span id="editor-status" class="hint" role="status" aria-live="polite"></span>
 	</div>
-	<p class="hint">Blöcke mit „+“ einfügen, über das Menü ⋮⋮ neben einem Block verschieben oder löschen. Speichern auch mit Strg/⌘ + S. Öffentlich wird erst, was veröffentlicht ist.</p>
+	<p id="editor-notice" class="notice" role="alert" hidden></p>
+	<p class="hint">{{if not .HTMLMode}}Blöcke mit „+“ einfügen, über das Menü ⋮⋮ neben einem Block verschieben oder löschen. {{end}}Änderungen werden alle 5 Sekunden automatisch als Entwurf gespeichert, auch mit Strg/⌘ + S. Öffentlich wird erst, was veröffentlicht ist.</p>
 </div>
+{{- if .AllowRaw}}
+<form method="post" action="{{.PageURL}}/format" data-save-first{{if .HTMLMode}} data-confirm="Zurück zum Block-Editor? Der HTML-Inhalt wird nicht in Blöcke umgewandelt – der Block-Editor beginnt leer. Der HTML-Stand bleibt unter „Revisionen“ wiederherstellbar."{{end}}>
+	<input type="hidden" name="csrf" value="{{$.CSRF}}">
+	{{- if .HTMLMode}}
+	<input type="hidden" name="format" value="blocks">
+	<button type="submit" class="link">Zum Block-Editor wechseln</button>
+	{{- else}}
+	<input type="hidden" name="format" value="html">
+	<button type="submit" class="link">In den HTML-Modus wechseln</button>
+	<span class="hint">– übernimmt die Blöcke als HTML-Code</span>
+	{{- end}}
+</form>
+{{- end}}
 {{end}}
 {{end}}
 
-<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/settings">
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/settings" data-save-first>
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<label for="slug">Adresse (letzter Teil)</label>
 	<input id="slug" name="slug" value="{{.Data.Page.Slug}}" maxlength="80" required pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false">
@@ -56,12 +78,39 @@
 	<button type="submit">Veröffentlichen</button>
 </form>
 {{end}}
-<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/delete">
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/delete" data-confirm="Seite endgültig löschen? Alle Revisionen werden mit gelöscht.">
 	<input type="hidden" name="csrf" value="{{.CSRF}}">
 	<button type="submit" class="link">Seite löschen</button>
 </form>
-{{if not .Data.Editor.HTMLMode}}
+
+{{with .Data.Revisions}}
+<h2 id="revisionen">Revisionen</h2>
+<p class="hint">Neueste zuerst. „Wiederherstellen“ legt eine neue Revision mit dem alten Inhalt an – nichts geht verloren. Automatisch gespeicherte Stände werden bis zu 10 Minuten lang zusammengefasst.</p>
+<table class="revisions">
+	<thead><tr><th>Gespeichert</th><th>Von</th><th>Titel</th><th>Hinweis</th><th>Aktionen</th></tr></thead>
+	<tbody>
+	{{- range .}}
+		<tr>
+			<td>{{.Saved}}</td>
+			<td>{{with .Author}}{{.}}{{else}}–{{end}}</td>
+			<td>{{.Title}}</td>
+			<td>{{if .Current}}aktueller Entwurf{{end}}{{if .Published}}{{if .Current}} · {{end}}veröffentlicht{{end}}{{if .Auto}} <span class="hint">(automatisch)</span>{{end}}{{if .HTML}} <span class="hint">(HTML)</span>{{end}}</td>
+			<td class="actions">
+				<a href="{{.PreviewURL}}" target="_blank" rel="noopener">Vorschau</a>
+				{{- if and (not .Current) .CanRestore}}
+				<form method="post" action="{{.RestoreURL}}" data-save-first>
+					<input type="hidden" name="csrf" value="{{$.CSRF}}">
+					<button type="submit" class="link">Wiederherstellen</button>
+				</form>
+				{{- end}}
+			</td>
+		</tr>
+	{{- end}}
+	</tbody>
+</table>
+{{end}}
 <link rel="stylesheet" href="{{asset "content/editor.css"}}">
+{{if not .Data.Editor.HTMLMode}}
 <script src="{{asset "content/editor-nonce.js"}}" nonce="{{.StyleNonce}}" defer></script>
 <script src="{{asset "content/editorjs-2.31.7.umd.js"}}" defer></script>
 <script src="{{asset "content/editorjs-header-2.8.9.umd.js"}}" defer></script>
@@ -72,6 +121,6 @@
 <script src="{{asset "content/editorjs-inline-code-1.5.2.umd.js"}}" defer></script>
 {{if .Data.Editor.AllowRaw}}<script src="{{asset "content/editorjs-raw-2.5.1.umd.js"}}" defer></script>{{end}}
 <script src="{{asset "content/editor-blocks.js"}}" defer></script>
-<script src="{{asset "content/editor.js"}}" defer></script>
 {{end}}
+<script src="{{asset "content/editor.js"}}" defer></script>
 </div>

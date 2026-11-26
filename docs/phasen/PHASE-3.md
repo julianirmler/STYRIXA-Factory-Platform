@@ -114,7 +114,7 @@ Vorhanden – benutzen, nicht neu bauen:
 
 - [x] 3.1 Renderer-Test je Blocktyp, XSS-Suite grün, Entwurf nicht öffentlich, Slug-Redirect 301
 - [x] 3.2 Seite ohne Code im Editor bau- und sortierbar
-- [ ] 3.3 Auto-Save, Vorschau, Revision wiederherstellbar, kein Datenverlust
+- [x] 3.3 Auto-Save, Vorschau, Revision wiederherstellbar, kein Datenverlust
 - [ ] 3.4 Dashboard ohne Cookies/personenbezogene Daten
 - [ ] 3.5 Smoke-Test in CI
 - [ ] `make check` und CI grün

@@ -105,14 +105,25 @@ func TestEditorPage(t *testing.T) {
 		t.Error("Editor fehlt für Editoren")
 	}
 
-	// HTML-Modus (3.3): Block-Editor ausgeblendet, damit er nichts überschreibt.
+	// HTML-Modus (3.3): Textarea statt Block-Editor, keine Editor.js-Dateien.
 	e.asAdmin()
-	if w := e.draft(id, `{"title":"Über uns","format":"html","body":"<p>Hallo</p>"}`); w.Code != 200 {
+	if w := e.draft(id, `{"title":"Über uns","format":"html","body":"<p>Hallo</p><script>x()</script>"}`); w.Code != 200 {
 		t.Fatalf("HTML-Entwurf: %d %s", w.Code, w.Body)
 	}
 	b = e.get(fmt.Sprintf("/admin/content/pages/%d", id)).Body.String()
-	if !strings.Contains(b, "im HTML-Modus gespeichert") || strings.Contains(b, `id="editorjs"`) || strings.Contains(b, "editorjs-2.31.7") {
-		t.Errorf("HTML-Modus: Editor nicht ausgeblendet\n%s", b)
+	for _, want := range []string{`data-mode="html"`, `<textarea id="html-body"`, `&lt;p&gt;Hallo&lt;/p&gt;&lt;script&gt;`, `value="blocks"`, `/admin/static/content-editor.`} {
+		if !strings.Contains(b, want) {
+			t.Errorf("HTML-Modus: fehlt %s", want)
+		}
+	}
+	if strings.Contains(b, `id="editorjs"`) || strings.Contains(b, "editorjs-2.31.7") || strings.Contains(b, "<script>x()") {
+		t.Errorf("HTML-Modus: Block-Editor geladen oder HTML nicht escaped\n%s", b)
+	}
+	// Editoren sehen den HTML-Code nicht als bearbeitbares Feld.
+	e.asEditor()
+	b = e.get(fmt.Sprintf("/admin/content/pages/%d", id)).Body.String()
+	if !strings.Contains(b, "nur Administratoren") || strings.Contains(b, "html-body") || strings.Contains(b, "/format") {
+		t.Errorf("HTML-Modus für Editoren bearbeitbar\n%s", b)
 	}
 }
 

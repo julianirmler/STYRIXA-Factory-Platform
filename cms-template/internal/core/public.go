@@ -214,8 +214,37 @@ func (p *Public) Error(w http.ResponseWriter, r *http.Request, status int) {
 	p.render(w, r, status, name, PublicView{Title: title})
 }
 
+// PublicPreviewer rendert eine Seite im öffentlichen Layout als Vorschau
+// (Content, Session 3.3). Nur hinter Auth.Require aufrufen (/admin/*).
+type PublicPreviewer interface {
+	Preview(w http.ResponseWriter, r *http.Request, v PublicView)
+}
+
+// previewCSP: Das öffentliche Layout (und Themes) nutzen Inline-Styles;
+// Inline-Skripte aus Raw-HTML laufen in der Vorschau nicht – sie liegt auf
+// dem Admin-Ursprung. Bilder und eingebettete Inhalte per https erlaubt.
+const previewCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; " +
+	"frame-src https:; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// Preview rendert v wie eine öffentliche Seite, aber nie indexierbar und nie
+// zwischengespeichert.
+func (p *Public) Preview(w http.ResponseWriter, r *http.Request, v PublicView) {
+	h := w.Header()
+	h.Set("X-Robots-Tag", "noindex, nofollow")
+	h.Set("Content-Security-Policy", previewCSP)
+	p.renderCache(w, r, http.StatusOK, PublicContent, v, "no-store")
+}
+
 // render ergänzt v um Sprache, Seitentitel und Status und rendert name.
 func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView) {
+	cacheControl := "no-cache"
+	if status >= 500 {
+		cacheControl = "no-store"
+	}
+	p.renderCache(w, r, status, name, v, cacheControl)
+}
+
+func (p *Public) renderCache(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView, cacheControl string) {
 	ctx := r.Context()
 	v.Lang, v.Status = Regions[0], status
 	if p.settings != nil {
@@ -235,10 +264,6 @@ func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name
 		slog.Error("public: Template", "template", name, "err", err)
 		p.fail(w, r)
 		return
-	}
-	cacheControl := "no-cache"
-	if status >= 500 {
-		cacheControl = "no-store"
 	}
 	writeHTML(w, r, status, cacheControl, buf.Bytes())
 }

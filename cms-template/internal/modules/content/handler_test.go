@@ -65,7 +65,7 @@ func newEnv(t *testing.T) *env {
 	mux := http.NewServeMux()
 	admin.Mount(mux)
 	public.Mount(mux)
-	m.Mount(mux, core.Deps{DB: db, Admin: admin})
+	m.Mount(mux, core.Deps{DB: db, Admin: admin, Public: public})
 	e.h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/admin") {
 			r = r.WithContext(core.WithUser(r.Context(), e.as, e.role))
