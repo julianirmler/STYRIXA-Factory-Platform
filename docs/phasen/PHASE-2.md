@@ -170,7 +170,7 @@ Deploy auf die leere Test-Subdomain → `/install` → Login. Prüfen und notier
 - [x] 2.2 Download der gewählten Kombination startet sofort, SHA-256 stimmt
 - [x] 2.2 `factory-api --ui` liefert das UI mit CSP aus (Go-Test), `node --test` für `src/lib/` grün, `make ui` in CI
 - [ ] 2.3 Deploy ohne Simulation inkl. Fingerprint-Dialog und Install-Code-Anzeige
-- [ ] 2.3 VPS: `/install` abgeschlossen, Login ok, zweites Deploy behält Daten
+- [x] 2.3 VPS: `/install` abgeschlossen, Login ok, zweites Deploy behält Daten (easyname Cloud Server mit Plesk, 26.11.2026)
 - [ ] 2.3 Webspace (mit CGI, falls vorhanden): Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403
 - [x] 2.4 Hoster-Probe auf easyname dokumentiert (Ergebnis: eigenes Binary nicht ausführbar → Brücke dort nicht möglich)
 - [ ] 2.4 easyname über PHP-Brücke: `/install` abgeschlossen, Login ok, Daten/Binary nicht abrufbar, Modus `php-bridge` im UI
@@ -200,3 +200,7 @@ Deploy auf die leere Test-Subdomain → `/install` → Login. Prüfen und notier
 | Brücke: Antwort leer / 500 | `error_log` des Hosters prüfen; meist `proc_open` gesperrt oder Binary ohne Ausführungsrecht (`SITE CHMOD 755`) |
 | `SITE CHMOD` nicht unterstützt | Rechte 755 für `styrixa.cgi` im Hoster-Panel setzen, Deploy wiederholen |
 | Port 8080 auf dem VPS belegt | im UI anderen internen App-Port wählen |
+| VPS mit Plesk: Port 80/443 belegt (nginx) | kein Caddy/`ufw`; Weiterleitung in `/var/www/vhosts/system/<domain>/conf/vhost_nginx.conf` (`location ~ ^/ { proxy_pass … }`), deployen als Plesk-Systembenutzer mit `/bin/bash` |
+| `systemctl --user`: „Failed to connect to bus“, Dienst läuft nur per `nohup` | `sudo apt install libpam-systemd dbus-user-session`, `sudo loginctl enable-linger <benutzer>` |
+| Fingerprint im Dialog ≠ `ssh-keygen` in der Konsole | anderer Schlüsseltyp (ECDSA statt ED25519) – alle prüfen: `for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf $f; done` |
+| Let's Encrypt scheitert über IPv6 / landet beim alten Server | alte A/AAAA-Einträge (auch `*`) im easyname-DNS löschen, TTL (1 h) abwarten |
