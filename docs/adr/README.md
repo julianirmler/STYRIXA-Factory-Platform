@@ -115,6 +115,8 @@ Erlaubte Abhängigkeiten: `modernc.org/sqlite`, `golang.org/x/crypto`. Sonst nur
 
 ## 012 – PHP-Brücke für Webspaces ohne CGI (z. B. easyname)
 
+**Status:** zurückgestellt (26.11.2026). Die Hoster-Probe zeigt, dass easyname-Webhosting keine eigenen Binaries ausführt (vermutlich `noexec`); die Brücke wäre dort wirkungslos. Entscheidung bleibt gültig für Hoster, die PHP, aber kein CGI anbieten und Binaries ausführen lassen.
+
 **Anlass:** Test 26.11.2026 auf easyname-Webhosting: `.htaccess` mit `Options +ExecCGI` liefert HTTP 500 – der Tarif führt kein CGI aus. Viele österreichische Shared-Hoster bieten nur PHP.
 
 **Entscheidung:** Ist CGI nicht verfügbar, wird das CMS über eine **PHP-Brücke** betrieben: eine kleine `index.php` (ca. 80 Zeilen, keine Anwendungslogik) startet das unveränderte Go-Binary pro Anfrage per `proc_open` und spricht mit ihm genau das CGI-Protokoll, das das CMS schon kann (`GATEWAY_INTERFACE`).

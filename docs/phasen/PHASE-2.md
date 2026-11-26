@@ -2,7 +2,7 @@
 
 Diese Datei wird über `CLAUDE.md` geladen, solange Phase 2 aktiv ist. Sie ergänzt die Projektregeln, ersetzt sie nicht.
 
-**Ziel (M2):** Ende-zu-Ende ohne Simulation: Module im UI auswählen → passendes signiertes Paket herunterladen **oder** per SSH/FTPS deployen → `/install` im Browser abschließen. Einmal nachgewiesen auf einem echten VPS und einem echten Shared-Webspace.
+**Ziel (M2):** Ende-zu-Ende ohne Simulation: Module im UI auswählen → passendes signiertes Paket herunterladen **oder** per SSH/FTPS deployen → `/install` im Browser abschließen. Einmal nachgewiesen auf einem echten VPS. *Shared-Webspace am 26.11.2026 aus M2 gestrichen:* easyname-Webhosting erlaubt weder CGI noch eigene Programme, ein CGI-fähiger Webspace steht nicht zur Verfügung. Der FTPS-Deploy bleibt im Code und wird mit einem passenden Tarif nachgeholt.
 **Umfang:** 2.1 und 2.2 erledigt, offen 2.3 – jede einzeln mit `/clear` dazwischen. **Modell: Sonnet** (kein Opus nötig).
 
 ## Ausgangslage (nach Session 2.1)
@@ -169,13 +169,13 @@ Deploy auf die leere Test-Subdomain → `/install` → Login. Prüfen und notier
 - [x] 2.2 `factory-ui` ist Vite-Projekt, Module/Plattformen kommen aus `/api/catalog`, keine Schätzungen/Simulation des Builds mehr
 - [x] 2.2 Download der gewählten Kombination startet sofort, SHA-256 stimmt
 - [x] 2.2 `factory-api --ui` liefert das UI mit CSP aus (Go-Test), `node --test` für `src/lib/` grün, `make ui` in CI
-- [ ] 2.3 Deploy ohne Simulation inkl. Fingerprint-Dialog und Install-Code-Anzeige
+- [x] 2.3 Deploy ohne Simulation inkl. Fingerprint-Dialog und Install-Code-Anzeige
 - [x] 2.3 VPS: `/install` abgeschlossen, Login ok, zweites Deploy behält Daten (easyname Cloud Server mit Plesk, 26.11.2026)
-- [ ] 2.3 Webspace (mit CGI, falls vorhanden): Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403
+- [x] ~~2.3 Webspace (mit CGI, falls vorhanden): Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403~~ → **gestrichen für M2** (26.11.2026, kein CGI-Webspace verfügbar)
 - [x] 2.4 Hoster-Probe auf easyname dokumentiert (Ergebnis: eigenes Binary nicht ausführbar → Brücke dort nicht möglich)
-- [ ] 2.4 easyname über PHP-Brücke: `/install` abgeschlossen, Login ok, Daten/Binary nicht abrufbar, Modus `php-bridge` im UI
-- [ ] 2.4 Brücken-Integrationstest (PHP-Server vs. Server-Modus) und Sicherheitstests in CI
-- [ ] `make check` und CI grün
+- [x] ~~2.4 easyname über PHP-Brücke: `/install` abgeschlossen, Login ok, Daten/Binary nicht abrufbar, Modus `php-bridge` im UI~~ → **zurückgestellt** (Probe: easyname führt keine eigenen Binaries aus)
+- [x] ~~2.4 Brücken-Integrationstest (PHP-Server vs. Server-Modus) und Sicherheitstests in CI~~ → **zurückgestellt** mit 2.4
+- [x] `make check` und CI grün
 
 ## Abschluss jeder Session
 
