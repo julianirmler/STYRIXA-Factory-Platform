@@ -10,12 +10,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log/slog"
 	"mime"
 	"net/http"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -103,8 +105,13 @@ type Admin struct {
 	home     string                // ID des Moduls mit AdminHome, "" = Kern-Startseite
 }
 
+// adminAsset verweist auf eine eingebettete Datei. Der Inhalt bleibt im
+// Binary (embed) und wird pro Anfrage gestreamt – nicht beim Start in den
+// Heap kopiert (≈ 440 KB mit Editor.js, doppelt über das GC-Ziel; M1: RSS < 20 MB).
 type adminAsset struct {
-	body  []byte
+	fsys  fs.FS
+	name  string
+	size  int64
 	ctype string
 }
 
@@ -209,11 +216,17 @@ func (a *Admin) addAssets(fsys fs.FS, id string) error {
 		if e.IsDir() {
 			continue
 		}
-		body, err := fs.ReadFile(fsys, e.Name())
+		f, err := fsys.Open(e.Name())
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(body)
+		h := sha256.New()
+		size, err := io.Copy(h, f)
+		f.Close()
+		if err != nil {
+			return err
+		}
+		sum := h.Sum(nil)
 		ext := path.Ext(e.Name())
 		key, url := e.Name(), strings.TrimSuffix(e.Name(), ext)+"."+hex.EncodeToString(sum[:5])+ext
 		if id != "" {
@@ -222,7 +235,7 @@ func (a *Admin) addAssets(fsys fs.FS, id string) error {
 		if _, dup := a.assets[url]; dup {
 			return fmt.Errorf("doppelte Datei %s", url)
 		}
-		a.assets[url] = adminAsset{body: body, ctype: mime.TypeByExtension(ext)}
+		a.assets[url] = adminAsset{fsys: fsys, name: e.Name(), size: size, ctype: mime.TypeByExtension(ext)}
 		a.urls[key] = pathAdminStatic + url
 	}
 	return nil
@@ -259,7 +272,18 @@ func (a *Admin) static(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", f.ctype)
 	h.Set("Cache-Control", "public, max-age=31536000, immutable")
 	h.Set("X-Content-Type-Options", "nosniff")
-	w.Write(f.body)
+	h.Set("Content-Length", strconv.FormatInt(f.size, 10))
+	if r.Method == http.MethodHead {
+		return
+	}
+	src, err := f.fsys.Open(f.name)
+	if err != nil {
+		slog.Error("admin: Datei nicht lesbar", "file", f.name, "err", err)
+		http.Error(w, msgInternal, http.StatusInternalServerError)
+		return
+	}
+	defer src.Close()
+	io.Copy(w, src)
 }
 
 type adminNavView struct {
