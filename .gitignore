@@ -18,3 +18,4 @@ factory-ui**/dist/
 
 # Schlüssel – niemals committen
 *.secret
+.cache-factory/

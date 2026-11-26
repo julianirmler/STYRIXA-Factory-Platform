@@ -210,3 +210,51 @@ func TestDeploySSHWithRollback(t *testing.T) {
 		t.Fatalf("Plattform-Fehler erwartet, bekam %v", err)
 	}
 }
+
+func TestCheckExecutable(t *testing.T) {
+	tests := []struct {
+		out     string
+		runErr  error
+		wantErr string
+	}{
+		{"rc=0\n", nil, ""},
+		{"rc=2\n", nil, ""}, // Programm lief, nur Flag-Fehler
+		{"rc=126\n", nil, "noexec"},
+		{"rc=127\n", nil, "noexec"},
+		{"", errors.New("Verbindung weg"), "Startprüfung"},
+	}
+	for _, tt := range tests {
+		var got string
+		err := checkExecutable(func(cmd string) (string, error) { got = cmd; return tt.out, tt.runErr }, "/home/x/my app/releases/1")
+		if !strings.Contains(got, `cd '/home/x/my app/releases/1' && ./styrixa -h`) {
+			t.Errorf("Befehl nicht gequotet: %s", got)
+		}
+		if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+			t.Errorf("%q: err = %v, want %q", tt.out, err, tt.wantErr)
+		}
+	}
+}
+
+// Echter Fall: Binary ohne Ausführungsrecht (wie noexec) → Abbruch vor dem Umschalten.
+func TestCheckExecutableRealShell(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "styrixa"), []byte("\x7fELF kaputt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(cmd string) (string, error) {
+		b, err := exec.Command("sh", "-c", cmd).Output()
+		return string(b), err
+	}
+	if err := checkExecutable(run, dir); err == nil || !strings.Contains(err.Error(), "noexec") {
+		t.Fatalf("err = %v", err)
+	}
+	app := buildFakeApp(t, false)
+	b, _ := os.ReadFile(app)
+	os.Remove(filepath.Join(dir, "styrixa"))
+	if err := os.WriteFile(filepath.Join(dir, "styrixa"), b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkExecutable(run, dir); err != nil {
+		t.Fatalf("lauffähiges Binary abgelehnt: %v", err)
+	}
+}

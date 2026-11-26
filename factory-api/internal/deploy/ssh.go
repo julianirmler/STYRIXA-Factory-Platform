@@ -150,6 +150,12 @@ func DeploySSH(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	log.emit("upload", "ok", "Release %s hochgeladen", rel)
 
+	// Startet das Binary dort überhaupt? (noexec-Home, falsches Format) – vor dem Umschalten
+	if err := checkExecutable(run, relDir); err != nil {
+		log.emit("upload", "error", "%v", err)
+		return nil, err
+	}
+
 	// Einmal-Code für /install – vor dem Start, denn der Health-Check legt die DB an.
 	code, err := newInstallCode()
 	if err != nil {
@@ -295,6 +301,22 @@ func switchCurrent(run func(string) (string, error), base, target, goos string) 
 	}
 	if _, err := run(cmd); err != nil {
 		return fmt.Errorf("Symlink umschalten: %w", err)
+	}
+	return nil
+}
+
+// checkExecutable ruft "./styrixa -h" im Release-Ordner auf. Exit 126/127
+// heißt: Der Server führt das Programm nicht aus – typisch für Shared
+// Hosting, dessen Home mit noexec eingehängt ist.
+func checkExecutable(run func(string) (string, error), dir string) error {
+	out, err := run(fmt.Sprintf(`cd %s && ./styrixa -h >/dev/null 2>&1; echo "rc=$?"`, shellQuote(dir)))
+	if err != nil {
+		return fmt.Errorf("Startprüfung: %w", err)
+	}
+	switch strings.TrimSpace(out) {
+	case "rc=126", "rc=127":
+		return errors.New("Der Server erlaubt keine eigenen Programme in diesem Ordner (Datenträger mit noexec eingehängt oder Format passt nicht). " +
+			"Das ist bei Shared Hosting üblich – SSH-Deploy hier nicht möglich, stattdessen „Webspace per FTP(S)“ (CGI) oder einen VPS nutzen.")
 	}
 	return nil
 }

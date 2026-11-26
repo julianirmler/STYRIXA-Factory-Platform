@@ -17,8 +17,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -91,6 +93,7 @@ func fakeApache(t *testing.T, rewrite bool) *httptest.Server {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		switch {
+		case serveProbe(w, p):
 		case p == "/healthz", strings.HasSuffix(p, "/styrixa.cgi/healthz"):
 			w.Write([]byte("ok"))
 		case rewrite && strings.HasSuffix(p, "/ping"):
@@ -226,11 +229,49 @@ func TestDeployFTPProbeFailureLeavesSiteUntouched(t *testing.T) {
 		want   string
 	}{
 		{"kein CGI", func(t *testing.T) *httptest.Server {
-			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }))
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if !serveProbe(w, r.URL.Path) {
+					w.WriteHeader(500)
+				}
+			}))
 			t.Cleanup(s.Close)
 			return s
 		}, "nicht als CGI"},
+		{"URL zeigt auf anderen Ordner", func(t *testing.T) *httptest.Server {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(404)
+				w.Write([]byte("<html><head><title>easyname | Verboten</title></head></html>"))
+			}))
+			t.Cleanup(s.Close)
+			return s
+		}, "zeigt nicht auf den Document-Root"},
 		{"kein mod_rewrite", func(t *testing.T) *httptest.Server { return fakeApache(t, false) }, "mod_rewrite"},
+		{"Options in .htaccess verboten (easyname)", func(t *testing.T) *httptest.Server {
+			var probeHits atomic.Int32
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// erster Abruf der Testdatei (vor der .htaccess) ok, danach alles 500
+				if strings.HasSuffix(r.URL.Path, "/"+probeFile) && probeHits.Add(1) == 1 {
+					serveProbe(w, r.URL.Path)
+					return
+				}
+				w.WriteHeader(500)
+			}))
+			t.Cleanup(s.Close)
+			return s
+		}, "Options +ExecCGI"},
+		{"kein mod_cgi: .cgi als Download (easyname)", func(t *testing.T) *httptest.Server {
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case serveProbe(w, r.URL.Path):
+				case strings.HasSuffix(r.URL.Path, "/styrixa.cgi"):
+					w.Write([]byte("\x7fELF\x02\x01\x01"))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(s.Close)
+			return s
+		}, "kein mod_cgi"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -260,4 +301,14 @@ func TestDeployFTPProbeFailureLeavesSiteUntouched(t *testing.T) {
 			}
 		})
 	}
+}
+
+// serveProbe beantwortet den Abruf der Testdatei wie ein Webserver, der
+// auf den Document-Root zeigt.
+func serveProbe(w http.ResponseWriter, p string) bool {
+	if !strings.HasSuffix(p, "/"+probeFile) {
+		return false
+	}
+	w.Write([]byte(probeToken(path.Base(path.Dir(p))) + "\n"))
+	return true
 }

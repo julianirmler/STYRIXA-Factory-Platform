@@ -27,12 +27,19 @@ import (
 // ---------------------------------------------------------------------------
 
 type ftpClient struct {
-	ctrl   net.Conn
-	tp     *textproto.Conn
-	tlsCfg *tls.Config // nil = unverschlüsselt
-	host   string
-	dialer net.Dialer
+	ctrl     net.Conn
+	tp       *textproto.Conn
+	tlsCfg   *tls.Config // nil = unverschlüsselt
+	host     string
+	dialer   net.Dialer
+	deadline time.Time // Gesamtfrist des Deployments (aus ctx)
+	broken   error     // Steuerverbindung nach Netzwerkfehler unbrauchbar
 }
+
+// ftpReplyTimeout: so lange wartet der Client höchstens auf die Antwort
+// auf einen Transfer-Befehl (150/125). Ohne eigene Frist würde ein
+// hängender Server erst nach der Gesamtfrist (10 min) auffallen.
+var ftpReplyTimeout = 60 * time.Second
 
 func certFingerprint(der []byte) string {
 	sum := sha256.Sum256(der)
@@ -99,6 +106,7 @@ func ftpDial(ctx context.Context, t Target, cred Credentials) (*ftpClient, error
 		c.ctrl = tc
 	}
 	if dl, ok := ctx.Deadline(); ok {
+		c.deadline = dl
 		_ = raw.SetDeadline(dl)
 	}
 	c.tp = textproto.NewConn(c.ctrl)
@@ -168,13 +176,22 @@ func (c *ftpClient) raw(format string, args ...any) (int, string, error) {
 	if strings.ContainsAny(line, "\r\n") {
 		return 0, "", errors.New("ungültige Zeichen im FTP-Befehl")
 	}
+	if c.broken != nil {
+		return 0, "", c.broken
+	}
 	if err := c.tp.PrintfLine("%s", line); err != nil {
+		c.broken = err
 		return 0, "", err
 	}
 	code, msg, err := c.tp.ReadResponse(0)
 	var pe *textproto.Error
 	if errors.As(err, &pe) {
 		return pe.Code, pe.Msg, nil
+	}
+	if err != nil {
+		// Nach Timeout/Abbruch ist der Antwortstrom nicht mehr synchron:
+		// weitere Befehle würden auf längst verlorene Antworten warten.
+		c.broken = err
 	}
 	return code, msg, err
 }
@@ -186,10 +203,15 @@ func (c *ftpClient) cmd(expect int, format string, args ...any) (string, error) 
 
 // read liest eine (weitere) Antwort ohne neuen Befehl, z. B. 226 nach Transfer.
 func (c *ftpClient) read(expect int) (string, error) {
+	if c.broken != nil {
+		return "", c.broken
+	}
 	code, msg, err := c.tp.ReadResponse(0)
 	var pe *textproto.Error
 	if errors.As(err, &pe) {
 		code, msg, err = pe.Code, pe.Msg, nil
+	} else if err != nil {
+		c.broken = err
 	}
 	return c.check(expect, code, msg, err)
 }
@@ -240,43 +262,103 @@ func (c *ftpClient) dataConn(ctx context.Context) (net.Conn, error) {
 	return tls.Client(conn, c.tlsCfg), nil
 }
 
-func (c *ftpClient) transfer(ctx context.Context, cmd string, fn func(net.Conn) error) error {
+func (c *ftpClient) transfer(ctx context.Context, cmd string, fn func(net.Conn) (int64, error)) error {
 	dc, err := c.dataConn(ctx)
 	if err != nil {
 		return err
 	}
-	code, msg, err := c.raw("%s", cmd)
+	// TLS-Handshake auf dem Datenkanal sofort starten (wie curl), nicht erst
+	// nach 150: Manche Server (z. B. easyname) senden 150 erst, wenn der
+	// Handshake steht – sonst warten Client und Server ewig aufeinander.
+	hs := make(chan error, 1)
+	if tc, ok := dc.(*tls.Conn); ok {
+		go func() { hs <- tc.HandshakeContext(ctx) }()
+	} else {
+		hs <- nil
+	}
+	code, msg, err := c.rawWithin("%s", cmd)
+	if err == nil && code != 150 && code != 125 {
+		err = &textproto.Error{Code: code, Msg: msg}
+	}
 	if err != nil {
 		dc.Close()
+		<-hs
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			return fmt.Errorf("Server antwortet nicht auf %s (Datenkanal/Firewall?): %w", strings.Fields(cmd)[0], err)
+		}
 		return err
 	}
-	if code != 150 && code != 125 {
+	if err := <-hs; err != nil {
 		dc.Close()
-		return &textproto.Error{Code: code, Msg: msg}
+		return fmt.Errorf("TLS-Datenkanal: %w", err)
 	}
-	if tc, ok := dc.(*tls.Conn); ok {
-		if err := tc.HandshakeContext(ctx); err != nil {
-			dc.Close()
-			return err
-		}
+	n, ferr := fn(dc)
+	cerr := closeData(dc, ferr == nil)
+	if ferr != nil {
+		ferr = fmt.Errorf("Datenübertragung nach %s abgebrochen: %w", humanBytes(n), ferr)
 	}
-	ferr := fn(dc)
-	cerr := dc.Close()
+	// Auch auf den Abschluss (226) nicht länger als ftpReplyTimeout warten
+	_ = c.ctrl.SetReadDeadline(c.replyDeadline())
+	defer c.ctrl.SetReadDeadline(c.deadline)
 	if _, err := c.read(226); err != nil {
+		var ne net.Error
+		if errors.As(err, &ne) && ne.Timeout() {
+			err = fmt.Errorf("Server bestätigt die Übertragung nicht (226 fehlt): %w", err)
+		}
 		return errors.Join(ferr, err)
 	}
 	return errors.Join(ferr, cerr)
 }
 
+// closeData beendet den Datenkanal sauber: erst die Schreibseite schließen
+// (bei TLS close_notify), dann bis EOF mitlesen, dann schließen. Hart
+// geschlossen schickt das Betriebssystem bei ungelesenen Daten – z. B.
+// TLS-1.3-Session-Tickets des Servers – einen TCP-Reset, und der Server
+// verwirft den Upload („450 Transfer aborted“, easyname 2026-11-26).
+func closeData(dc net.Conn, graceful bool) error {
+	if graceful {
+		var werr error
+		switch c := dc.(type) {
+		case *tls.Conn:
+			werr = c.CloseWrite()
+		case interface{ CloseWrite() error }:
+			werr = c.CloseWrite()
+		}
+		if werr == nil {
+			_ = dc.SetReadDeadline(time.Now().Add(ftpDrainTimeout))
+			_, _ = io.Copy(io.Discard, dc)
+		}
+	}
+	return dc.Close()
+}
+
+// ftpDrainTimeout: so lange wartet closeData höchstens auf das Ende des Datenkanals.
+var ftpDrainTimeout = 30 * time.Second
+
+func (c *ftpClient) replyDeadline() time.Time {
+	dl := time.Now().Add(ftpReplyTimeout)
+	if !c.deadline.IsZero() && c.deadline.Before(dl) {
+		dl = c.deadline
+	}
+	return dl
+}
+
+// rawWithin wie raw, aber mit eigener Lesefrist für die Antwort.
+func (c *ftpClient) rawWithin(format string, args ...any) (int, string, error) {
+	_ = c.ctrl.SetReadDeadline(c.replyDeadline())
+	defer c.ctrl.SetReadDeadline(c.deadline)
+	return c.raw(format, args...)
+}
+
 func (c *ftpClient) stor(ctx context.Context, path string, r io.Reader) error {
-	return c.transfer(ctx, "STOR "+path, func(conn net.Conn) error { _, err := io.Copy(conn, r); return err })
+	return c.transfer(ctx, "STOR "+path, func(conn net.Conn) (int64, error) { return io.Copy(conn, r) })
 }
 
 func (c *ftpClient) retr(ctx context.Context, path string) ([]byte, error) {
 	var buf bytes.Buffer
-	err := c.transfer(ctx, "RETR "+path, func(conn net.Conn) error {
-		_, err := io.Copy(&buf, io.LimitReader(conn, 1<<20))
-		return err
+	err := c.transfer(ctx, "RETR "+path, func(conn net.Conn) (int64, error) {
+		return io.Copy(&buf, io.LimitReader(conn, 1<<20))
 	})
 	return buf.Bytes(), err
 }
@@ -314,6 +396,34 @@ func (c *ftpClient) rename(from, to string) error {
 func (c *ftpClient) dele(path string) { _, _, _ = c.raw("DELE %s", path) }
 func (c *ftpClient) rmd(path string)  { _, _, _ = c.raw("RMD %s", path) }
 
+// checkDocroot prüft, ob der Document-Root existiert, ohne ihn anzulegen.
+// Ein falscher Pfad (z. B. /factory-test statt /html/factory-test, weil der
+// Login in /html startet) würde sonst Ordner außerhalb der Website erzeugen.
+func (c *ftpClient) checkDocroot(root string) error {
+	if root == "" {
+		return nil
+	}
+	start := "/"
+	if _, msg, err := c.raw("PWD"); err == nil {
+		if i, j := strings.Index(msg, `"`), strings.LastIndex(msg, `"`); i >= 0 && j > i {
+			start = msg[i+1 : j]
+		}
+	}
+	code, _, err := c.raw("CWD %s", root)
+	if err != nil {
+		return err
+	}
+	if code/100 != 2 {
+		hint := ""
+		if start != "/" && !strings.HasPrefix(root, start+"/") {
+			hint = fmt.Sprintf(" Nach dem Login steht man in %s – gemeint ist vermutlich %s/%s.", start, strings.TrimRight(start, "/"), strings.TrimLeft(root, "/"))
+		}
+		return fmt.Errorf("Document-Root %s existiert nicht.%s Ordner der Subdomain im Hoster-Panel prüfen", root, hint)
+	}
+	_, _, _ = c.raw("CWD %s", start) // zurück, relative Pfade bleiben gültig
+	return nil
+}
+
 func (c *ftpClient) chmod(mode, path string) error {
 	_, err := c.cmd(200, "SITE CHMOD %s %s", mode, path)
 	return err
@@ -348,6 +458,10 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	log.emit("connect", "ok", "Angemeldet als %s", t.User)
 
 	root := strings.TrimRight(t.RemoteDir, "/")
+	if err := c.checkDocroot(root); err != nil {
+		log.emit("connect", "error", "%v", err)
+		return nil, err
+	}
 	p := func(name string) string {
 		if root == "" {
 			return name
@@ -372,11 +486,30 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	probe := p(probeName)
 	c.mkdirAll(probe)
 	cleanupProbe := func() {
-		for _, n := range []string{"styrixa.cgi", ".htaccess"} {
+		for _, n := range []string{"styrixa.cgi", ".htaccess", probeFile} {
 			c.dele(probe + "/" + n)
 		}
 		c.rmd(probe)
+		if c.broken != nil {
+			log.emit("check", "warn", "Prüfordner %s konnte nicht entfernt werden (Verbindung abgebrochen) – bitte per FTP löschen", probe)
+		}
 	}
+	base := strings.TrimRight(t.PublicURL, "/") + "/" + probeName
+
+	// 1a. Zeigt die Website-URL überhaupt auf diesen Ordner? Erst eine kleine
+	//     Textdatei – sonst würde ein falsch zugeordneter Ordner als
+	//     „kein CGI“ gemeldet (easyname, 2026-11-26).
+	if err := c.stor(ctx, probe+"/"+probeFile, strings.NewReader(probeToken(probeName))); err != nil {
+		cleanupProbe()
+		return nil, fmt.Errorf("Upload: %w", err)
+	}
+	if err := checkServesDir(ctx, httpClient, base, probeName); err != nil {
+		cleanupProbe()
+		log.emit("check", "error", "%v", err)
+		return nil, fmt.Errorf("Hoster-Check fehlgeschlagen – an der Website wurde nichts verändert: %w", err)
+	}
+	log.emit("check", "ok", "Website-URL zeigt auf den Document-Root")
+
 	log.emit("check", "info", "Hoster-Check: lade Programm in Prüfordner (%s) …", humanBytes(st.Size()))
 	if err := c.stor(ctx, probe+"/styrixa.cgi", f); err != nil {
 		cleanupProbe()
@@ -389,7 +522,6 @@ func DeployFTP(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 		cleanupProbe()
 		return nil, err
 	}
-	base := strings.TrimRight(t.PublicURL, "/") + "/" + probeName
 	if err := probeHoster(ctx, httpClient, base); err != nil {
 		cleanupProbe()
 		log.emit("check", "error", "%v", err)
@@ -498,10 +630,73 @@ RewriteRule ^ping$ styrixa.cgi/healthz [L]
 </IfModule>
 `
 
+// probeFile liegt während des Hoster-Checks im Prüfordner.
+const probeFile = "styrixa-probe.txt"
+
+func probeToken(probeName string) string { return "styrixa-probe " + probeName }
+
+// checkServesDir ruft die Textdatei über die Website-URL ab.
+func checkServesDir(ctx context.Context, client *http.Client, base, probeName string) error {
+	url := base + "/" + probeFile
+	var last string
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req.Header.Set("User-Agent", "STYRIXA-Factory-Deploy/1")
+		resp, err := client.Do(req)
+		if err != nil {
+			last = err.Error()
+		} else {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK && strings.TrimSpace(string(b)) == probeToken(probeName) {
+				return nil
+			}
+			last = fmt.Sprintf("HTTP %d%s", resp.StatusCode, htmlTitle(b))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
+	return fmt.Errorf("die Website-URL zeigt nicht auf den Document-Root – eine dort abgelegte Testdatei ist unter %s nicht abrufbar (%s). "+
+		"Im Hoster-Panel prüfen, welchem Ordner die Domain zugeordnet ist (Änderungen brauchen ggf. einige Minuten)", url, last)
+}
+
+// cgiDiagnosis unterscheidet die typischen Ursachen, wenn das Programm nicht
+// als CGI läuft (gesehen bei easyname, 2026-11-26):
+//   - Testdatei plötzlich HTTP 500 → .htaccess-Zeile „Options +ExecCGI“ verboten
+//   - styrixa.cgi kommt als Datei zurück → kein CGI-Handler (mod_cgi fehlt)
+func cgiDiagnosis(ctx context.Context, client *http.Client, base string) string {
+	get := func(url string) (int, []byte) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req.Header.Set("User-Agent", "STYRIXA-Factory-Deploy/1")
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, nil
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 16))
+		return resp.StatusCode, b
+	}
+	if code, _ := get(base + "/" + probeFile); code == http.StatusInternalServerError {
+		return "der Hoster erlaubt die nötige .htaccess-Einstellung „Options +ExecCGI“ nicht (sogar eine Textdatei liefert dann HTTP 500) – " +
+			"dieser Tarif unterstützt kein CGI, bitte SSH-Deployment oder anderen Tarif nutzen"
+	}
+	if code, b := get(base + "/styrixa.cgi"); code == http.StatusOK && bytes.HasPrefix(b, []byte("\x7fELF")) {
+		return "der Hoster führt .cgi-Dateien nicht aus, sondern liefert sie als Download aus (kein mod_cgi) – " +
+			"dieser Tarif unterstützt kein CGI, bitte SSH-Deployment oder anderen Tarif nutzen"
+	}
+	return ""
+}
+
 // probeHoster prüft erst CGI direkt, dann über mod_rewrite – mit klarer Diagnose.
 func probeHoster(ctx context.Context, client *http.Client, base string) error {
 	direct := waitHealthy(ctx, client, base+"/styrixa.cgi/healthz", 3, time.Second)
 	if direct != nil {
+		if why := cgiDiagnosis(ctx, client, base); why != "" {
+			return fmt.Errorf("%s: %w", why, direct)
+		}
 		return fmt.Errorf("das Programm wird nicht als CGI ausgeführt (Apache mit mod_cgi und .htaccess nötig; "+
 			"bei reinem nginx-Hosting bitte SSH-Deployment nutzen): %w", direct)
 	}

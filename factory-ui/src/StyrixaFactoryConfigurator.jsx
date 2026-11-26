@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   Lock,
   Check,
@@ -19,12 +19,14 @@ import {
   Globe,
   AlertTriangle,
   Fingerprint,
+  Copy,
   RotateCcw,
   X,
 } from "lucide-react";
 import { getCatalog, selectPackage, streamDeploy as apiStreamDeploy } from "./lib/api.js";
 import { normalize, toggle as toggleSelection } from "./lib/selection.js";
 import { formatSize, moduleMeta, targetMeta } from "./lib/moduleMeta.js";
+import { deployBody, deployReducer, initialDeploy, pinKey, validateDeploy } from "./lib/deployFlow.js";
 
 /* ------------------------------------------------------------------ */
 /*  STYRIXA Factory – Configurator                                     */
@@ -42,9 +44,6 @@ const DELIVERY = [
   { id: "ssh", label: "Server per SSH", sub: "VPS, Managed Server, Hosting mit SSH", icon: Server, badge: "Empfohlen" },
   { id: "ftp", label: "Webspace per FTP(S)", sub: "Shared Hosting mit Apache (CGI-Modus)", icon: Globe },
 ];
-
-// true = Deploy wird im Browser simuliert (bis Session 2.3); false = echte factory-api (SSE)
-const MOCK_DEPLOY = true;
 
 const SELECT_DEBOUNCE_MS = 150;
 
@@ -92,12 +91,11 @@ export default function StyrixaFactoryConfigurator() {
     publicUrl: "https://",
     tls: "explicit",
   });
-  const [deployPhase, setDeployPhase] = useState("idle"); // idle | running | confirm | done | error
-  const [deployLogs, setDeployLogs] = useState([]);
-  const [identity, setIdentity] = useState(null); // {kind, fingerprint, mismatch}
-  const [confirmedFp, setConfirmedFp] = useState("");
-  const [deployResult, setDeployResult] = useState(null);
-  const deployTimers = useRef([]);
+  const [deploy, dispatch] = useReducer(deployReducer, initialDeploy);
+  // Nur im Speicher dieser Seite, nie in localStorage:
+  const pins = useRef(new Map()); // bestätigte Fingerprints je Ziel (pinKey)
+  const pending = useRef(null); // Anfrage inkl. Zugangsdaten bis zum Ende des Ablaufs
+  const deployAbort = useRef(null);
 
   /* ---- Katalog laden ---- */
   useEffect(() => {
@@ -141,12 +139,11 @@ export default function StyrixaFactoryConfigurator() {
     };
   }, [catalog, selected, target]);
 
-  useEffect(() => () => deployTimers.current.forEach(clearTimeout), []);
+  useEffect(() => () => deployAbort.current?.abort(), []);
 
   // Neues Paket → laufendes Deploy-Ergebnis gehört nicht mehr dazu
   useEffect(() => {
     resetDeploy();
-    setConfirmedFp("");
   }, [pkg?.id]);
 
   const modules = catalog?.modules ?? [];
@@ -154,7 +151,7 @@ export default function StyrixaFactoryConfigurator() {
   const activeModules = modules.filter((m) => selected.has(m.id));
   const [goos, goarch] = target.split("/");
   const binName = `styrixa${goos === "windows" ? ".exe" : ""}`;
-  const depLocked = deployPhase === "running";
+  const depLocked = deploy.phase === "running" || deploy.phase === "confirm";
 
   function toggle(mod) {
     if (mod.required || depLocked) return;
@@ -175,150 +172,82 @@ export default function StyrixaFactoryConfigurator() {
     setNotice(null);
   }
 
+  function dropCredentials() {
+    pending.current = null;
+  }
+
   function resetDeploy() {
-    deployTimers.current.forEach(clearTimeout);
-    deployTimers.current = [];
-    setDeployPhase("idle");
-    setDeployLogs([]);
-    setIdentity(null);
-    setDeployResult(null);
+    deployAbort.current?.abort();
+    deployAbort.current = null;
+    dropCredentials();
+    dispatch({ type: "reset" });
   }
 
   const setD = (k) => (e) => setDep((d) => ({ ...d, [k]: e.target.value }));
 
-  const deployErrors = useMemo(() => {
-    if (delivery === "download") return [];
-    const e = [];
-    if (!/^[A-Za-z0-9.-]+$/.test(dep.host)) e.push("Host ohne Protokoll angeben, z. B. ftp.kunde.at");
-    if (!/^[A-Za-z0-9._@+-]+$/.test(dep.user)) e.push("Benutzername fehlt");
-    if (dep.auth === "password" && !dep.password) e.push("Passwort fehlt");
-    if (delivery === "ssh" && dep.auth === "key" && !dep.privateKey.includes("PRIVATE KEY")) e.push("Privater Schlüssel fehlt");
-    if (delivery === "ftp" && !/^https?:\/\/[^/]+/.test(dep.publicUrl)) e.push("Website-URL für den Health-Check fehlt");
-    if (delivery === "ftp" && goos !== "linux") e.push("Webspace läuft auf Linux – Zielplattform Linux wählen");
-    return e;
-  }, [delivery, dep, goos]);
+  const deployErrors = useMemo(() => validateDeploy(delivery, dep, target), [delivery, dep, target]);
 
-  const pushLog = (level, msg) =>
-    setDeployLogs((l) => [...l, { level, msg, t: new Date().toLocaleTimeString("de-AT") }]);
-
-  function deployTarget(fp) {
-    const base = {
-      method: delivery,
-      host: dep.host,
-      port: Number(dep.port) || 0,
-      user: dep.user,
-      publicUrl: dep.publicUrl === "https://" ? "" : dep.publicUrl,
-      fingerprint: fp,
+  // POST /api/packages/{id}/deploy → Server-Sent Events
+  function runDeploy(body) {
+    deployAbort.current?.abort();
+    const ac = new AbortController();
+    deployAbort.current = ac;
+    const live = (fn) => (d) => {
+      if (!ac.signal.aborted) fn(d);
     };
-    return delivery === "ssh"
-      ? { ...base, remoteDir: dep.remoteDir, appPort: Number(dep.appPort) || 8080 }
-      : { ...base, remoteDir: dep.docroot, tls: dep.tls };
-  }
-
-  // Echte Anbindung: POST /api/packages/{id}/deploy → Server-Sent Events
-  function streamDeploy(fp) {
-    return apiStreamDeploy(
+    apiStreamDeploy(
       pkg.id,
+      body,
       {
-        target: deployTarget(fp),
-        password: dep.auth === "password" ? dep.password : "",
-        privateKey: dep.auth === "key" ? dep.privateKey : "",
+        log: live((d) => dispatch({ type: "log", level: d.level, msg: d.msg })),
+        identity: live((d) => dispatch({ type: "identity", identity: d })),
+        result: live((d) => {
+          dropCredentials();
+          dispatch({ type: "result", result: d });
+        }),
+        error: live((d) => {
+          dropCredentials();
+          dispatch({ type: "error", message: d.message });
+        }),
       },
-      {
-        log: (d) => pushLog(d.level, d.msg),
-        identity: (d) => {
-          setIdentity(d);
-          setDeployPhase("confirm");
-        },
-        result: (d) => {
-          setDeployResult(d);
-          setDeployPhase("done");
-        },
-        error: (d) => {
-          pushLog("error", d.message);
-          setDeployPhase("error");
-        },
-      }
-    );
+      ac.signal
+    )
+      .then(() => {
+        if (!ac.signal.aborted) dispatch({ type: "end" });
+      })
+      .catch((e) => {
+        if (ac.signal.aborted || e.name === "AbortError") return;
+        dropCredentials();
+        dispatch({ type: "error", message: e.message });
+      });
   }
 
-  // Simulation bis Session 2.3 – nutzt schon die echte Paket-ID
-  function mockDeploy(fp) {
-    const isSSH = delivery === "ssh";
-    const fakeFp = isSSH ? "SHA256:q7nF2c9xVb1kPz0R8mWlT4aYd6sHgE3uJiK5oNpQrS0" : "SHA256:Zk3P8sWq1LmN7bVx2cR5tY9uI0oPaS4dF6gH8jK1lE0";
-    const kind = isSSH ? "ssh-host-key" : "tls-certificate";
-    const steps = [[300, "info", `Verbinde mit ${dep.host}${isSSH ? ":" + (dep.port || 22) : ":" + (dep.port || 21) + " (FTPS)"} als ${dep.user} …`]];
-    if (!fp) {
-      steps.forEach(([d, l, m]) => deployTimers.current.push(setTimeout(() => pushLog(l, m), d)));
-      deployTimers.current.push(
-        setTimeout(() => {
-          setIdentity({ kind, fingerprint: fakeFp, mismatch: false });
-          setDeployPhase("confirm");
-        }, 900)
-      );
-      return;
-    }
-    const rel = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
-    const more = isSSH
-      ? [
-          [400, "ok", `Verbunden, Host-Key ${fp.slice(0, 18)}… bestätigt`],
-          [400, "ok", `Server-Plattform ${target} passt`],
-          [700, "info", `Lade Paket ${pkg.id} hoch (${formatSize(pkg.size)}) …`],
-          [900, "ok", `Release ${rel} hochgeladen`],
-          [300, "ok", `current → releases/${rel}`],
-          [500, "ok", "systemd-User-Service styrixa gestartet"],
-          [700, "info", `Health-Check 127.0.0.1:${dep.appPort}/healthz …`],
-          [600, "ok", "App antwortet"],
-        ]
-      : [
-          [400, "ok", `Angemeldet als ${dep.user} (FTPS, Zertifikat gepinnt)`],
-          [300, "ok", "Datenordner styrixa-data/ angelegt und geschützt"],
-          [900, "info", `Lade styrixa.cgi aus ${pkg.id} hoch (${formatSize(pkg.size)}) …`],
-          [500, "ok", "styrixa.cgi aktiv (Rechte 755)"],
-          [400, "warn", `Bestehende .htaccess gesichert als .htaccess.styrixa-backup-${rel}`],
-          [300, "ok", "CGI-Routing eingerichtet"],
-          [700, "info", `Health-Check ${dep.publicUrl.replace(/\/$/, "")}/healthz …`],
-          [600, "ok", "Website antwortet"],
-        ];
-    let acc = 0;
-    [...steps, ...more].forEach(([d, l, m]) => {
-      acc += d;
-      deployTimers.current.push(setTimeout(() => pushLog(l, m), acc));
-    });
-    deployTimers.current.push(
-      setTimeout(() => {
-        setDeployResult({
-          release: rel,
-          url: dep.publicUrl === "https://" ? "" : dep.publicUrl,
-          installCode: "DEMO-CODE-NURZ-UMTE",
-          hints: isSSH
-            ? [`App lauscht auf 127.0.0.1:${dep.appPort} – Domain per Caddy/nginx darauf zeigen lassen.`]
-            : ["CGI-Modus: ideal für kleine bis mittlere Websites."],
-          caddy: isSSH
-            ? `${dep.publicUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "") || "kunde.at"} {\n\treverse_proxy 127.0.0.1:${dep.appPort}\n}`
-            : null,
-        });
-        setDeployPhase("done");
-      }, acc + 300)
-    );
+  function startDeploy() {
+    if (!pkg || deployErrors.length) return;
+    const pin = pins.current.get(pinKey(delivery, dep.host, dep.port));
+    const body = deployBody(delivery, dep, pin);
+    pending.current = body;
+    // Zugangsdaten sofort aus dem Formular entfernen
+    setDep((d) => ({ ...d, password: "", privateKey: "" }));
+    dispatch({ type: "start" });
+    runDeploy(body);
   }
 
-  function startDeploy(fp = confirmedFp) {
-    if (!pkg) return;
-    resetDeploy();
-    setDeployPhase("running");
-    if (MOCK_DEPLOY) return mockDeploy(fp);
-    streamDeploy(fp).catch((e) => {
-      pushLog("error", e.message);
-      setDeployPhase("error");
-    });
+  function confirmIdentity(acknowledged) {
+    const id = deploy.identity;
+    const body = pending.current;
+    if (!id || !body || (id.mismatch && !acknowledged)) return;
+    const t = body.target;
+    pins.current.set(pinKey(t.method, t.host, t.port), id.fingerprint);
+    const next = { ...body, target: { ...t, fingerprint: id.fingerprint } };
+    pending.current = next;
+    dispatch({ type: "confirm", acknowledged });
+    runDeploy(next);
   }
 
-  function confirmIdentity() {
-    const fp = identity.fingerprint;
-    setConfirmedFp(fp);
-    setIdentity(null);
-    startDeploy(fp);
+  function cancelIdentity() {
+    dropCredentials();
+    dispatch({ type: "cancel" });
   }
 
   /* ---- Lade- und Fehlerzustand des Katalogs ---- */
@@ -531,7 +460,6 @@ export default function StyrixaFactoryConfigurator() {
                     disabled={depLocked}
                     onClick={() => {
                       setDelivery(d.id);
-                      setConfirmedFp("");
                       resetDeploy();
                       setDep((x) => ({ ...x, port: "", auth: d.id === "ftp" ? "password" : x.auth }));
                     }}
@@ -719,12 +647,14 @@ export default function StyrixaFactoryConfigurator() {
               {delivery !== "download" && pkg && (
                 <DeployPanel
                   delivery={delivery}
-                  phase={deployPhase}
-                  logs={deployLogs}
-                  result={deployResult}
+                  phase={deploy.phase}
+                  logs={deploy.logs}
+                  result={deploy.result}
                   errors={deployErrors}
                   host={dep.host}
-                  onDeploy={() => startDeploy()}
+                  pkgId={pkg.id}
+                  tunnel={delivery === "ssh" && dep.host ? `ssh -L 8080:127.0.0.1:${Number(dep.appPort) || 8080} ${dep.user}@${dep.host}${dep.port ? " -p " + dep.port : ""}` : ""}
+                  onDeploy={startDeploy}
                 />
               )}
             </div>
@@ -737,9 +667,8 @@ export default function StyrixaFactoryConfigurator() {
         </aside>
       </main>
 
-      {deployPhase === "confirm" && identity && (
-        <IdentityModal identity={identity} host={dep.host} onConfirm={confirmIdentity}
-          onCancel={() => { setIdentity(null); setDeployPhase("idle"); pushLog("warn", "Deployment abgebrochen – Fingerprint nicht bestätigt"); }} />
+      {deploy.phase === "confirm" && deploy.identity && (
+        <IdentityModal identity={deploy.identity} host={dep.host} onConfirm={confirmIdentity} onCancel={cancelIdentity} />
       )}
     </Shell>
   );
@@ -820,7 +749,7 @@ function Field({ label, children, className = "" }) {
   );
 }
 
-function DeployPanel({ delivery, phase, logs, result, errors, host, onDeploy }) {
+function DeployPanel({ delivery, phase, logs, result, errors, host, tunnel, pkgId, onDeploy }) {
   const ref = useRef(null);
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
@@ -843,9 +772,12 @@ function DeployPanel({ delivery, phase, logs, result, errors, host, onDeploy }) 
             </ul>
           ) : (
             <p className="mb-3 text-xs text-slate-500">
-              Ziel: <span className="font-mono text-slate-300">{host}</span> · Zugangsdaten aus Schritt 4
+              Ziel: <span className="font-mono text-slate-300">{host}</span> · Zugangsdaten aus Schritt 3
             </p>
           )}
+          <p className="mb-3 text-xs text-slate-500">
+            Paket: <span className="font-mono text-slate-300">{pkgId}</span>
+          </p>
           <button
             onClick={onDeploy}
             disabled={errors.length > 0}
@@ -873,33 +805,66 @@ function DeployPanel({ delivery, phase, logs, result, errors, host, onDeploy }) 
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
             <Check className="h-4 w-4" /> Live – Release <span className="font-mono text-xs">{result.release}</span>
           </div>
-          {result.url && (
+          {result.installCode && <InstallCode code={result.installCode} />}
+          {result.url ? (
             <a href={result.url.replace(/\/$/, "") + "/install"} target="_blank" rel="noreferrer"
               className="flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-slate-200">
               <Globe className="h-4 w-4" /> Installer öffnen
             </a>
-          )}
-          {result.installCode && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
-              <p className="text-[11px] uppercase tracking-wide text-amber-300/80">Installations-Code für /install</p>
-              <p className="mt-1 select-all font-mono text-base tracking-widest">{result.installCode}</p>
-              <p className="mt-1 text-[11px] text-amber-200/70">Nur einmal gültig. Steht auch in der Datei install-code im Datenordner.</p>
-            </div>
+          ) : (
+            tunnel && (
+              <div className="rounded-lg bg-black/60 p-2.5 font-mono text-[10.5px] leading-relaxed text-slate-300">
+                <div className="text-slate-500"># Ohne Domain: per SSH-Tunnel öffnen</div>
+                {tunnel}
+                <div className="text-slate-500"># → http://127.0.0.1:8080/install</div>
+              </div>
+            )
           )}
           {result.hints?.map((h) => (
             <p key={h} className="text-[11px] text-slate-500">{h}</p>
           ))}
-          {result.caddy && (
-            <pre className="overflow-x-auto rounded-lg bg-black/60 p-2.5 font-mono text-[10.5px] text-emerald-300/90">{result.caddy}</pre>
-          )}
+          {Object.entries(result.snippets ?? {}).map(([name, text]) => (
+            <details key={name} className="rounded-lg bg-black/60 p-2.5 text-[11px] text-slate-400">
+              <summary className="cursor-pointer select-none">{name === "caddy" ? "Caddy" : name === "nginx" ? "nginx" : name}-Konfiguration</summary>
+              <pre className="mt-2 overflow-x-auto font-mono text-[10.5px] text-emerald-300/90">{text}</pre>
+            </details>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
+function InstallCode({ code }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* Zwischenablage nicht verfügbar – Code ist markierbar */
+    }
+  }
+  return (
+    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-amber-100">
+      <p className="text-[11px] uppercase tracking-wide text-amber-300/80">Installations-Code für /install</p>
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <p className="select-all break-all font-mono text-2xl font-bold tracking-widest">{code}</p>
+        <button onClick={copy} title="Kopieren"
+          className="flex shrink-0 items-center gap-1 rounded-md border border-amber-400/40 px-2 py-1.5 text-xs hover:bg-amber-400/10">
+          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} {copied ? "Kopiert" : "Kopieren"}
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-semibold text-amber-200">Nur einmal angezeigt – jetzt notieren.</p>
+    </div>
+  );
+}
+
 function IdentityModal({ identity, host, onConfirm, onCancel }) {
   const ssh = identity.kind === "ssh-host-key";
+  const [ack, setAck] = useState(false);
+  const blocked = identity.mismatch && !ack;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
@@ -921,13 +886,19 @@ function IdentityModal({ identity, host, onConfirm, onCancel }) {
           <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">{ssh ? "Host-Key" : "Zertifikat"} · SHA-256</div>
           <div className="break-all font-mono text-xs text-cyan-200">{identity.fingerprint}</div>
         </div>
+        {identity.mismatch && (
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
+            Ich habe den neuen Fingerprint mit dem Hoster abgeglichen und will trotzdem fortfahren.
+          </label>
+        )}
         <div className="mt-5 flex gap-2">
           <button onClick={onCancel} className="flex-1 rounded-lg border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-500">
             Abbrechen
           </button>
-          <button onClick={onConfirm}
-            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-bold ${identity.mismatch ? "bg-rose-500 text-white hover:bg-rose-400" : "bg-cyan-400 text-slate-950 hover:bg-cyan-300"}`}>
-            <span className="inline-flex items-center gap-1.5"><KeyRound className="h-4 w-4" /> Vertrauen &amp; deployen</span>
+          <button onClick={() => onConfirm(identity.mismatch ? ack : false)} disabled={blocked}
+            className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40 ${identity.mismatch ? "bg-rose-500 text-white hover:bg-rose-400" : "bg-cyan-400 text-slate-950 hover:bg-cyan-300"}`}>
+            <span className="inline-flex items-center gap-1.5"><KeyRound className="h-4 w-4" /> {identity.mismatch ? "Trotzdem vertrauen" : "Vertrauen & deployen"}</span>
           </button>
         </div>
       </div>

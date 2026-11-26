@@ -22,7 +22,11 @@ func waitHealthy(ctx context.Context, client *http.Client, url string, attempts 
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}
-			last = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			if t := htmlTitle(body); t != "" {
+				last = fmt.Errorf("HTTP %d%s", resp.StatusCode, t)
+			} else {
+				last = fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			}
 		} else {
 			last = err
 		}
@@ -33,4 +37,18 @@ func waitHealthy(ctx context.Context, client *http.Client, url string, attempts 
 		}
 	}
 	return fmt.Errorf("health-check %s fehlgeschlagen: %w", url, last)
+}
+
+// htmlTitle liefert „ (Titel)“ einer HTML-Fehlerseite statt des ganzen Markups.
+func htmlTitle(b []byte) string {
+	s := string(b)
+	i := strings.Index(strings.ToLower(s), "<title>")
+	if i < 0 {
+		return ""
+	}
+	s = s[i+len("<title>"):]
+	if j := strings.Index(strings.ToLower(s), "</title>"); j >= 0 {
+		s = s[:j]
+	}
+	return " (" + strings.TrimSpace(s) + ")"
 }
