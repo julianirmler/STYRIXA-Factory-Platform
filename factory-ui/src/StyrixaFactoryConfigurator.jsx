@@ -26,7 +26,7 @@ import {
 import { getCatalog, selectPackage, streamDeploy as apiStreamDeploy } from "./lib/api.js";
 import { normalize, toggle as toggleSelection } from "./lib/selection.js";
 import { formatSize, moduleMeta, targetMeta } from "./lib/moduleMeta.js";
-import { deployBody, deployReducer, initialDeploy, pinKey, validateDeploy } from "./lib/deployFlow.js";
+import { deployBody, deployReducer, hostKeyCheckCommand, initialDeploy, pinKey, validateDeploy } from "./lib/deployFlow.js";
 
 /* ------------------------------------------------------------------ */
 /*  STYRIXA Factory – Configurator                                     */
@@ -883,9 +883,17 @@ function IdentityModal({ identity, host, onConfirm, onCancel }) {
             : `Erste Verbindung zu ${host}. Vergleiche den Fingerprint mit der Angabe in deinem Hoster-Panel, bevor du Zugangsdaten überträgst.`}
         </p>
         <div className="mt-4 rounded-lg border border-slate-700 bg-black/50 p-3">
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">{ssh ? "Host-Key" : "Zertifikat"} · SHA-256</div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">
+            {ssh ? "Host-Key" : "Zertifikat"}{identity.keyType ? ` · ${identity.keyType}` : ""} · SHA-256
+          </div>
           <div className="break-all font-mono text-xs text-cyan-200">{identity.fingerprint}</div>
         </div>
+        {ssh && hostKeyCheckCommand(identity.keyType) && (
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">
+            In der Server-Konsole denselben Schlüsseltyp prüfen:{" "}
+            <code className="break-all font-mono text-slate-300">{hostKeyCheckCommand(identity.keyType)}</code>
+          </p>
+        )}
         {identity.mismatch && (
           <label className="mt-4 flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-200">
             <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />

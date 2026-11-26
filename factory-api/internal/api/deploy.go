@@ -114,7 +114,7 @@ func (h *DeployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var idErr *deploy.UnknownIdentityError
 	switch {
 	case errors.As(err, &idErr):
-		send("identity", map[string]any{"kind": idErr.Kind, "fingerprint": idErr.Fingerprint, "mismatch": idErr.Mismatch})
+		send("identity", map[string]any{"kind": idErr.Kind, "fingerprint": idErr.Fingerprint, "keyType": idErr.KeyType, "mismatch": idErr.Mismatch})
 	case err != nil:
 		send("error", map[string]string{"message": err.Error()})
 	default:

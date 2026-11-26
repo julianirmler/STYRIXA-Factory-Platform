@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -64,16 +65,18 @@ func DeploySSH(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}
 	var idErr *UnknownIdentityError
 	cfg := &ssh.ClientConfig{
-		User:    t.User,
-		Auth:    auth,
-		Timeout: 15 * time.Second,
+		User:              t.User,
+		Auth:              auth,
+		Timeout:           15 * time.Second,
+		HostKeyAlgorithms: preferredHostKeyAlgorithms,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			fp := ssh.FingerprintSHA256(key)
+			kt := sshKeyType(key.Type())
 			switch {
 			case t.Fingerprint == "":
-				idErr = &UnknownIdentityError{Kind: "ssh-host-key", Fingerprint: fp}
+				idErr = &UnknownIdentityError{Kind: "ssh-host-key", Fingerprint: fp, KeyType: kt}
 			case t.Fingerprint != fp:
-				idErr = &UnknownIdentityError{Kind: "ssh-host-key", Fingerprint: fp, Mismatch: true}
+				idErr = &UnknownIdentityError{Kind: "ssh-host-key", Fingerprint: fp, KeyType: kt, Mismatch: true}
 			default:
 				return nil
 			}
@@ -223,6 +226,29 @@ func DeploySSH(ctx context.Context, art Artifact, t Target, cred Credentials, lo
 	}, nil
 }
 
+// preferredHostKeyAlgorithms: ED25519 zuerst – das ist der Schlüssel, den
+// Kunden in der Konsole meist prüfen (ssh-keygen -lf …ed25519…). Ohne Vorgabe
+// handelt x/crypto oft ECDSA aus, und die Fingerprints scheinen nicht zu passen.
+// Kein ssh-rsa (SHA-1).
+var preferredHostKeyAlgorithms = []string{
+	ssh.KeyAlgoED25519,
+	ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521,
+	ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256,
+}
+
+// sshKeyType: lesbarer Schlüsseltyp für den Fingerprint-Dialog.
+func sshKeyType(algo string) string {
+	switch {
+	case algo == ssh.KeyAlgoED25519:
+		return "ED25519"
+	case strings.HasPrefix(algo, "ecdsa-"):
+		return "ECDSA"
+	case algo == ssh.KeyAlgoRSA:
+		return "RSA"
+	}
+	return algo
+}
+
 func sshAuth(c Credentials) ([]ssh.AuthMethod, error) {
 	var m []ssh.AuthMethod
 	if len(c.PrivateKeyPEM) > 0 {
@@ -343,7 +369,10 @@ func restartService(run func(string) (string, error), log Logger, base, service 
 			return "systemd", hints, nil
 		}
 	}
-	// Fallback: nohup + PID-Datei
+	// Fallback: nohup + PID-Datei – mit Diagnose, warum systemd --user fehlt
+	if goos == "linux" {
+		hints = systemdUserDiagnosis(run, log)
+	}
 	pid := q(base + "/shared/styrixa.pid")
 	cmd := fmt.Sprintf(`if [ -f %[1]s ]; then kill "$(cat %[1]s)" 2>/dev/null; sleep 1; fi; `+
 		`cd %[2]s && { STYRIXA_DATA=%[3]s nohup ./styrixa --addr 127.0.0.1:%[4]d >> %[5]s 2>&1 < /dev/null & echo $! > %[1]s; }`,
@@ -352,7 +381,46 @@ func restartService(run func(string) (string, error), log Logger, base, service 
 		return "nohup", nil, fmt.Errorf("Start: %w", err)
 	}
 	log.emit("service", "warn", "systemd --user nicht verfügbar – mit nohup gestartet (kein Autostart nach Reboot)")
-	return "nohup", []string{"Kein systemd verfügbar: Für Autostart nach Neustart einen @reboot-Cronjob oder den Hoster-Prozessmanager nutzen."}, nil
+	if len(hints) == 0 {
+		hints = []string{"Kein systemd verfügbar: Für Autostart nach Neustart einen @reboot-Cronjob oder den Hoster-Prozessmanager nutzen."}
+	}
+	return "nohup", hints, nil
+}
+
+// pamSystemdPaths: übliche Orte von pam_systemd.so (Debian/Ubuntu multiarch,
+// RHEL/Fedora, ältere Layouts). Feste Werte, bewusst ungequotet (Glob). Tests überschreiben sie.
+var pamSystemdPaths = []string{
+	"/lib/*/security/pam_systemd.so", "/lib/security/pam_systemd.so", "/lib64/security/pam_systemd.so",
+	"/usr/lib/*/security/pam_systemd.so", "/usr/lib/security/pam_systemd.so", "/usr/lib64/security/pam_systemd.so",
+}
+
+var reUnixUser = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}$`)
+
+// systemdUserDiagnosis klärt, warum "systemctl --user" nicht erreichbar ist.
+// Häufigster Fall (z. B. easyname Cloud Server): systemd ist da, aber
+// libpam-systemd fehlt → keine User-Session, kein user@<uid>.service.
+func systemdUserDiagnosis(run func(string) (string, error), log Logger) []string {
+	out, err := run(`command -v systemctl >/dev/null 2>&1 || { echo no-systemd; exit 0; }; ` +
+		`for f in ` + strings.Join(pamSystemdPaths, " ") + `; do if [ -e "$f" ]; then echo pam-ok; exit 0; fi; done; echo pam-missing`)
+	if err != nil {
+		return nil
+	}
+	who, _ := run("id -un")
+	who = strings.TrimSpace(who)
+	if !reUnixUser.MatchString(who) {
+		who = "<benutzer>"
+	}
+	switch strings.TrimSpace(out) {
+	case "pam-missing":
+		log.emit("service", "warn", "systemd --user nicht erreichbar: pam_systemd fehlt auf dem Server (Paket libpam-systemd)")
+		return []string{"systemd --user ist nicht erreichbar, weil pam_systemd fehlt – die App läuft vorerst per nohup ohne Autostart. " +
+			"Einmalig als Admin ausführen und danach erneut deployen: sudo apt install libpam-systemd dbus-user-session && sudo loginctl enable-linger " + who}
+	case "pam-ok":
+		log.emit("service", "warn", "systemd --user nicht erreichbar, obwohl pam_systemd vorhanden ist (User-Session/D-Bus fehlt)")
+		return []string{"systemd --user ist nicht erreichbar (keine User-Session bzw. kein User-D-Bus) – die App läuft vorerst per nohup ohne Autostart. " +
+			"Einmalig als Admin ausführen und danach erneut deployen: sudo apt install dbus-user-session && sudo loginctl enable-linger " + who}
+	}
+	return nil
 }
 
 func rollback(run func(string) (string, error), log Logger, base, prev, service string, port int, goos, mode string) {

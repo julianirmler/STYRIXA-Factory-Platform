@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deployBody, deployReducer, initialDeploy, pinKey, validateDeploy } from "./deployFlow.js";
+import { deployBody, deployReducer, hostKeyCheckCommand, initialDeploy, pinKey, validateDeploy } from "./deployFlow.js";
 
 const run = (...actions) => actions.reduce(deployReducer, initialDeploy);
 const ID = { kind: "ssh-host-key", fingerprint: "SHA256:abc", mismatch: false };
@@ -68,6 +68,27 @@ test("Validierung", () => {
   assert.ok(validateDeploy("ssh", { ...FORM, port: "70000" }, "linux/amd64").length);
   assert.ok(validateDeploy("ssh", { ...FORM, auth: "key" }, "linux/amd64").some((e) => /Schlüssel/.test(e)));
   assert.ok(validateDeploy("ssh", { ...FORM, password: "" }, "linux/amd64").some((e) => /Passwort/.test(e)));
+});
+
+test("leere Zugangsdaten werden vor dem Absenden abgefangen", () => {
+  const KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n";
+  const key = { ...FORM, auth: "key", password: "" };
+  const has = (errs, re) => errs.some((e) => re.test(e));
+  // Zweites Deploy nach geleertem Formular
+  assert.ok(has(validateDeploy("ssh", { ...FORM, password: "" }, "linux/amd64"), /^Passwort fehlt/));
+  assert.ok(has(validateDeploy("ssh", { ...FORM, password: "   " }, "linux/amd64"), /^Passwort fehlt/), "nur Leerzeichen");
+  assert.ok(has(validateDeploy("ftp", { ...FORM, password: "", publicUrl: "https://t.kunde.at" }, "linux/amd64"), /^Passwort fehlt/));
+  assert.ok(has(validateDeploy("ssh", key, "linux/amd64"), /^Privater Schlüssel fehlt/));
+  assert.ok(has(validateDeploy("ssh", { ...key, privateKey: " \n " }, "linux/amd64"), /^Privater Schlüssel fehlt/));
+  assert.ok(has(validateDeploy("ssh", { ...key, privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nabc" }, "linux/amd64"), /unvollständig/));
+  assert.deepEqual(validateDeploy("ssh", { ...key, privateKey: KEY }, "linux/amd64"), [], "vollständiger Schlüssel, kein Passwort nötig");
+  assert.deepEqual(validateDeploy("ssh", { ...FORM, auth: "key", privateKey: KEY, password: "" }, "linux/amd64"), []);
+});
+
+test("Konsolenbefehl je Schlüsseltyp", () => {
+  assert.equal(hostKeyCheckCommand("ED25519"), "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub");
+  assert.equal(hostKeyCheckCommand("ECDSA"), "ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub");
+  assert.equal(hostKeyCheckCommand(undefined), "");
 });
 
 test("Ordner-Prüfung wie am Server", () => {

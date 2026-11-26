@@ -62,11 +62,12 @@ func ftpTLSConfig(host, pinned string, idErr **UnknownIdentityError) *tls.Config
 		}
 		leaf := cs.PeerCertificates[0]
 		fp := certFingerprint(leaf.Raw)
+		kt := strings.ToUpper(leaf.PublicKeyAlgorithm.String()) // RSA | ECDSA | ED25519
 		if pinned != "" {
 			if fp == pinned {
 				return nil
 			}
-			*idErr = &UnknownIdentityError{Kind: "tls-certificate", Fingerprint: fp, Mismatch: true}
+			*idErr = &UnknownIdentityError{Kind: "tls-certificate", Fingerprint: fp, KeyType: kt, Mismatch: true}
 			return *idErr
 		}
 		inter := x509.NewCertPool()
@@ -76,7 +77,7 @@ func ftpTLSConfig(host, pinned string, idErr **UnknownIdentityError) *tls.Config
 		if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Intermediates: inter}); err == nil {
 			return nil
 		}
-		*idErr = &UnknownIdentityError{Kind: "tls-certificate", Fingerprint: fp}
+		*idErr = &UnknownIdentityError{Kind: "tls-certificate", Fingerprint: fp, KeyType: kt}
 		return *idErr
 	}
 	return cfg

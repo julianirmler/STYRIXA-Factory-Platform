@@ -2,7 +2,9 @@ package deploy
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -24,7 +26,7 @@ import (
 
 // testSSHServer: minimaler SSH-Server (exec + direct-tcpip), Befehle laufen
 // per sh -c mit HOME=home. Ersetzt einen echten Server im Test.
-func testSSHServer(t *testing.T, home string) (addr string, fp string) {
+func testSSHServer(t *testing.T, home string, extraHostKeys ...ssh.Signer) (addr string, fp string) {
 	t.Helper()
 	_, hk, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := ssh.NewSignerFromKey(hk)
@@ -34,6 +36,9 @@ func testSSHServer(t *testing.T, home string) (addr string, fp string) {
 		}
 		return nil, errors.New("nein")
 	}}
+	for _, k := range extraHostKeys {
+		cfg.AddHostKey(k)
+	}
 	cfg.AddHostKey(signer)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -151,6 +156,12 @@ func TestDeploySSHWithRollback(t *testing.T) {
 		}
 	})
 
+	// pam_systemd „fehlt“: Der Test-Server hat ohnehin keine User-Session (leere Umgebung)
+	orig := pamSystemdPaths
+	pamSystemdPaths = []string{filepath.Join(t.TempDir(), "*/security/pam_systemd.so")}
+	t.Cleanup(func() { pamSystemdPaths = orig })
+	_, systemctlErr := exec.LookPath("systemctl")
+
 	tgt := Target{AllowPrivateNetworks: true, Method: MethodSSH, Host: host, Port: port, User: "deploy", AppPort: appPort, PublicURL: "https://kunde.at"}
 	cred := Credentials{Password: "geheim"}
 	art := Artifact{Name: "kunde", BinaryPath: buildFakeApp(t, false), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
@@ -178,6 +189,9 @@ func TestDeploySSHWithRollback(t *testing.T) {
 	}
 	if res.Snippets["caddy"] == "" {
 		t.Error("Caddy-Snippet fehlt")
+	}
+	if systemctlErr == nil && !strings.Contains(strings.Join(res.Hints, "\n"), "sudo apt install libpam-systemd dbus-user-session && sudo loginctl enable-linger ") {
+		t.Errorf("pam_systemd-Hinweis fehlt: %q", res.Hints)
 	}
 	code, _ := os.ReadFile(filepath.Join(home, "styrixa/shared/data", installCodeFile))
 	if res.InstallCode == "" || parseInstallCode(code) != res.InstallCode {
@@ -208,6 +222,84 @@ func TestDeploySSHWithRollback(t *testing.T) {
 	wrong.GOARCH = "riscv64"
 	if _, err := DeploySSH(ctx, wrong, tgt, cred, nil, nil); err == nil || !strings.Contains(err.Error(), "Plattform") {
 		t.Fatalf("Plattform-Fehler erwartet, bekam %v", err)
+	}
+}
+
+// Server bietet ECDSA und ED25519 an → Client handelt ED25519 aus und meldet den Typ.
+func TestSSHPrefersED25519HostKey(t *testing.T) {
+	ek, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecSigner, _ := ssh.NewSignerFromKey(ek)
+	addr, fp := testSSHServer(t, t.TempDir(), ecSigner)
+	host, ps, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(ps)
+	tgt := Target{AllowPrivateNetworks: true, Method: MethodSSH, Host: host, Port: port, User: "deploy", AppPort: 8080}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := DeploySSH(ctx, Artifact{Name: "x", GOOS: "linux", GOARCH: "amd64"}, tgt, Credentials{Password: "geheim"}, nil, nil)
+	var idErr *UnknownIdentityError
+	if !errors.As(err, &idErr) {
+		t.Fatalf("Host-Key-Rückfrage erwartet, bekam %v", err)
+	}
+	if idErr.KeyType != "ED25519" || idErr.Fingerprint != fp {
+		t.Fatalf("KeyType %q, Fingerprint %q – erwartet ED25519 %q", idErr.KeyType, idErr.Fingerprint, fp)
+	}
+}
+
+func TestSSHKeyType(t *testing.T) {
+	for in, want := range map[string]string{
+		ssh.KeyAlgoED25519: "ED25519", ssh.KeyAlgoECDSA256: "ECDSA", ssh.KeyAlgoECDSA521: "ECDSA", ssh.KeyAlgoRSA: "RSA",
+	} {
+		if got := sshKeyType(in); got != want {
+			t.Errorf("%s → %s, want %s", in, got, want)
+		}
+	}
+}
+
+// Diagnose mit echter Shell: systemctl vorhanden/fehlt, pam_systemd vorhanden/fehlt.
+func TestSystemdUserDiagnosis(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "systemctl"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
+	os.WriteFile(filepath.Join(bin, "id"), []byte("#!/bin/sh\necho deploy\n"), 0o755)
+	orig := pamSystemdPaths
+	t.Cleanup(func() { pamSystemdPaths = orig })
+	pamSystemdPaths = []string{filepath.Join(root, "lib/*/security/pam_systemd.so"), filepath.Join(root, "lib/security/pam_systemd.so")}
+
+	shell := func(path string) func(string) (string, error) {
+		return func(cmd string) (string, error) {
+			c := exec.Command("/bin/sh", "-c", cmd)
+			c.Env = []string{"PATH=" + path}
+			b, err := c.Output()
+			return string(b), err
+		}
+	}
+	withSystemctl := shell(bin + ":/usr/bin:/bin")
+
+	var logged []string
+	logf := Logger(func(e Event) { logged = append(logged, e.Msg) })
+	h := systemdUserDiagnosis(withSystemctl, logf)
+	want := "sudo apt install libpam-systemd dbus-user-session && sudo loginctl enable-linger deploy"
+	if len(h) != 1 || !strings.Contains(h[0], want) {
+		t.Fatalf("pam fehlt: Hinweis %q", h)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "pam_systemd fehlt") {
+		t.Errorf("Log: %q", logged)
+	}
+
+	so := filepath.Join(root, "lib/x86_64-linux-gnu/security/pam_systemd.so")
+	os.MkdirAll(filepath.Dir(so), 0o755)
+	os.WriteFile(so, nil, 0o644)
+	h = systemdUserDiagnosis(withSystemctl, nil)
+	if len(h) != 1 || strings.Contains(h[0], "libpam-systemd") || !strings.Contains(h[0], "enable-linger deploy") {
+		t.Fatalf("pam vorhanden: Hinweis %q", h)
+	}
+
+	if h := systemdUserDiagnosis(shell(filepath.Join(root, "leer")), nil); h != nil {
+		t.Fatalf("ohne systemctl kein pam-Hinweis erwartet: %q", h)
+	}
+	if h := systemdUserDiagnosis(func(string) (string, error) { return "", errors.New("weg") }, nil); h != nil {
+		t.Fatalf("Fehler: %q", h)
 	}
 }
 

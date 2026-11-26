@@ -65,9 +65,17 @@ export function validateDeploy(method, form, target) {
   if (form.port !== "" && !(Number.isInteger(Number(form.port)) && form.port > 0 && form.port < 65536))
     e.push("Port muss zwischen 1 und 65535 liegen");
   if (!/^[A-Za-z0-9._@+-]+$/.test(form.user)) e.push("Benutzername fehlt");
+  // Zugangsdaten werden nach jedem Deploy geleert – vor dem Absenden abfangen,
+  // sonst scheitert es erst am Server („attempted methods [none]“).
   const auth = method === "ftp" ? "password" : form.auth;
-  if (auth === "password" && !form.password) e.push("Passwort fehlt");
-  if (auth === "key" && !form.privateKey.includes("PRIVATE KEY")) e.push("Privater Schlüssel fehlt");
+  if (auth === "key") {
+    const key = (form.privateKey || "").trim();
+    if (!key) e.push("Privater Schlüssel fehlt – er wird nach jedem Deploy aus Sicherheitsgründen geleert, bitte erneut einfügen");
+    else if (!/^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]+-----END [A-Z0-9 ]*PRIVATE KEY-----$/.test(key))
+      e.push("Privater Schlüssel unvollständig – bitte komplett inkl. BEGIN- und END-Zeile einfügen");
+  } else if (!form.password || !form.password.trim()) {
+    e.push("Passwort fehlt – es wird nach jedem Deploy aus Sicherheitsgründen geleert, bitte erneut eingeben");
+  }
   // gleiche Regel wie der Server (deploy.rePath): Pfade gehen in Shell-/FTP-Befehle
   const dir = (method === "ssh" ? form.remoteDir : form.docroot).trim();
   const dirLabel = method === "ssh" ? "App-Ordner" : "Document-Root";
@@ -81,6 +89,12 @@ export function validateDeploy(method, form, target) {
   if (method === "ftp" && !target.startsWith("linux/"))
     e.push("Webspace läuft auf Linux – Zielplattform Linux wählen");
   return e;
+}
+
+/** Konsolenbefehl, mit dem der Kunde den Host-Key desselben Typs prüft (leer = unbekannter Typ). */
+export function hostKeyCheckCommand(keyType) {
+  const file = { ED25519: "ed25519", ECDSA: "ecdsa", RSA: "rsa" }[keyType];
+  return file ? `ssh-keygen -lf /etc/ssh/ssh_host_${file}_key.pub` : "";
 }
 
 /** Anfrage-Body für POST /api/packages/{id}/deploy. */

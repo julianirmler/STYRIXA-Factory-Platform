@@ -111,7 +111,8 @@ type Result struct {
 type UnknownIdentityError struct {
 	Kind        string // "ssh-host-key" | "tls-certificate"
 	Fingerprint string
-	Mismatch    bool // true = abweichend vom bestätigten Wert → möglicher Angriff
+	KeyType     string // "ED25519" | "ECDSA" | "RSA" – damit der Kunde den passenden Schlüssel vergleicht
+	Mismatch    bool   // true = abweichend vom bestätigten Wert → möglicher Angriff
 }
 
 func (e *UnknownIdentityError) Error() string {
