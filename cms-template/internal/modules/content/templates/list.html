@@ -1,0 +1,37 @@
+<div data-styrixa-template="content-list">
+{{with .Data.Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+
+<form method="post" action="/admin/content/pages">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<label for="title">Neue Seite</label>
+	<input id="title" name="title" value="{{.Data.Title}}" maxlength="200" required placeholder="Titel, z. B. Über uns">
+	{{- if .Data.Parents}}
+	<label for="parent_id">Unter</label>
+	<select id="parent_id" name="parent_id">
+		<option value="0">– oberste Ebene –</option>
+		{{- range .Data.Parents}}
+		<option value="{{.ID}}">{{.Path}}</option>
+		{{- end}}
+	</select>
+	{{- end}}
+	<button type="submit">Seite anlegen</button>
+</form>
+
+{{if .Data.Pages}}
+<table>
+	<thead><tr><th>Titel</th><th>Adresse</th><th>Status</th><th>Geändert</th></tr></thead>
+	<tbody>
+	{{- range .Data.Pages}}
+		<tr>
+			<td>{{with .Indent}}<span class="hint">{{.}}</span>{{end}}<a href="/admin/content/pages/{{.ID}}">{{.Title}}</a>{{if .Home}} <span class="hint">(Startseite)</span>{{end}}</td>
+			<td><code>{{.Path}}</code></td>
+			<td>{{.Status}}</td>
+			<td>{{.Updated}}</td>
+		</tr>
+	{{- end}}
+	</tbody>
+</table>
+{{else}}
+<p class="hint">Noch keine Seiten angelegt.</p>
+{{end}}
+</div>

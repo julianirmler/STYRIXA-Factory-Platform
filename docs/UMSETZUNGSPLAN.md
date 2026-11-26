@@ -150,8 +150,17 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 
 ## Phase 3 – Pflichtmodule (5 Sessions)
 
-- [ ] 🟣 **3.1** Content: Datenmodell (Seiten, Revisionen, Entwürfe), Block-JSON im Editor.js-Format, Go-Renderer pro Blocktyp, Slugs
+- [x] 🟣 **3.1** Content: Datenmodell (Seiten, Revisionen, Entwürfe), Block-JSON im Editor.js-Format, Go-Renderer pro Blocktyp, Slugs
   - *Abnahme:* Renderer-Test je Blocktyp, XSS-Test (Text-Blöcke werden escaped)
+  - *Erledigt 2026-11-26, Abweichungen/Entscheidungen:*
+    - **Seitenhierarchie schon jetzt** (Nutzerentscheidung): `content_pages.parent_id` + `path` (voller Pfad, UNIQUE NOCASE, Wahrheit für die Auflösung), Tiefe ≤ 5, Pfad ≤ 255 Zeichen. Slug-/Elternwechsel verschiebt den ganzen Teilbaum in einer Transaktion; jeder alte Pfad landet in `content_redirects` (`from_path` → `page_id`, Ziel = aktueller Pfad, keine Ketten). Reservierte Slugs gelten nur auf oberster Ebene; Löschen mit Unterseiten → 400. Kanonisch: abweichende Groß-/Kleinschreibung, `/`-Endung und der eigene Pfad der Startseite → 301.
+    - **Rollenspalte jetzt** (Nutzerentscheidung): Kern-Migration `004_roles.sql` (`core_users.role` = `admin` | `editor`, bestehende Konten = Admin), Rolle wird pro Anfrage mit der Session gelesen; `core.IsAdmin`/`CurrentRole`/`WithUser`. Raw-Blöcke und HTML-Modus nur für Admins (403, serverseitig). Navigation filtert nach `NavItem.Role`. **Offen für Phase 4 (Users-Modul):** Editoren anlegen und Routen anderer Module für Editoren sperren – bis dahin kann kein Editor-Konto entstehen.
+    - Kern: `core.PageSource` (`PublicPage(ctx, path) (PublicPage, bool, error)`, 301 über `RedirectTo`), `PublicView` ergänzt um `Body`, `Description`, `Path`; neues Kern-Template `page.html` (Theme-überschreibbar), Layout setzt `<meta name="description">`.
+    - Admin zusätzlich `GET /admin/content/pages/{id}` und `POST …/{id}/settings` (Slug, Elternseite, Startseite) – sonst wären Slug-Änderung und Hierarchie nicht bedienbar. `…/draft` nimmt JSON `{title, format, body}` (unbekannte Felder → 400) und antwortet JSON.
+    - Sanitizer als eigener Tokenizer: Text wird erst entschlüsselt (Editor.js liefert `&amp;`, `&nbsp;`), dann escaped; erlaubte Tags kanonisch neu geschrieben. Bild-URLs ohne `//`; CTA-URL wird schon beim Speichern geprüft.
+    - Tests: `make test` und CI-RSS-Schritt laufen mit `-tags "mod_content mod_dashboard"`; Binary-Tests (`public_test`, `jobs_test`) übernehmen die Tags des Testlaufs (`buildtags_*_test.go`). Prüfung der reservierten Slugs per Quelltext-Scan aller `HandleFunc`-Routen und `Path…`-Konstanten.
+    - Revisionen-Aufräumen als Lazy-Job `content.prune_revisions` (täglich).
+    - `TestLazyJobRunsInCGIMode` angepasst: Mit dem ersten Modul-Job läuft `core.cleanup` nicht mehr zwingend bei der ersten Anfrage (pro Anfrage höchstens ein Job) – der Test fragt jetzt bis zu einmal je registriertem Job an.
 - [ ] **3.2** Editor.js einbinden (ADR-003): vendort, Grundblöcke + FAQ/Answer-First/CTA, Speichern per htmx
   - *Abnahme:* Seite ohne Code bau- und sortierbar
 - [ ] **3.3** HTML-Modus (Textarea), Auto-Save alle 5 s, Vorschau, Revisionen wiederherstellen

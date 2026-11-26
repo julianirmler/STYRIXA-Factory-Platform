@@ -91,7 +91,7 @@ func NewAdmin(db *sql.DB, settings Settings, mods []Module) (*Admin, error) {
 		return nil, err
 	}
 
-	a.nav = []NavItem{{Label: "Übersicht", Path: "/admin", Order: 0}}
+	a.nav = []NavItem{{Label: "Übersicht", Path: "/admin", Role: RoleEditor, Order: 0}}
 	for _, m := range mods {
 		a.nav = append(a.nav, m.AdminNav()...)
 	}
@@ -237,7 +237,11 @@ func (a *Admin) Render(w http.ResponseWriter, r *http.Request, status int, p Adm
 	if v.SiteTitle == "" {
 		v.SiteTitle = "STYRIXA"
 	}
+	editor := CurrentRole(ctx) == RoleEditor
 	for _, n := range a.nav {
+		if editor && n.Role != RoleEditor {
+			continue // Mindestrolle Admin (leer) – für Editoren unsichtbar
+		}
 		active := r.URL.Path == n.Path || (n.Path != "/admin" && strings.HasPrefix(r.URL.Path, n.Path+"/"))
 		v.Nav = append(v.Nav, adminNavView{NavItem: n, Active: active})
 	}

@@ -24,7 +24,7 @@ func TestPublicServerEqualsCGI(t *testing.T) {
 		t.Skip("baut ein Binary")
 	}
 	bin := filepath.Join(t.TempDir(), "styrixa")
-	build := exec.Command("go", "build", "-trimpath", "-o", bin, ".")
+	build := exec.Command("go", "build", "-trimpath", "-tags", buildTags(), "-o", bin, ".")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)

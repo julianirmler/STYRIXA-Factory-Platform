@@ -15,7 +15,7 @@ type NavItem struct {
 	Label string
 	Path  string
 	Icon  string // lucide-Name, z. B. "shopping-cart"
-	Role  string // Mindestrolle; leer = Admin
+	Role  string // Mindestrolle: RoleEditor = auch Editoren; leer = nur Admins
 	Order int
 }
 

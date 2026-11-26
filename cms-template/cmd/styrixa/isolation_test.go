@@ -15,22 +15,30 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 		t.Skip("baut mehrere Binaries")
 	}
 	const (
-		shopMarker = `data-styrixa-template="shop-admin-placeholder"`
-		shopTmpl   = "../../internal/modules/shop/templates/placeholder.html"
-		coreMarker = "Dieser Bereich ist noch in Arbeit" // Kern-Template: immer enthalten
+		shopMarker    = `data-styrixa-template="shop-admin-placeholder"`
+		shopTmpl      = "../../internal/modules/shop/templates/placeholder.html"
+		contentMarker = `data-styrixa-template="content-list"`
+		contentTmpl   = "../../internal/modules/content/templates/list.html"
+		coreMarker    = "Dieser Bereich ist noch in Arbeit" // Kern-Template: immer enthalten
 	)
-	src, err := os.ReadFile(shopTmpl)
-	if err != nil || !bytes.Contains(src, []byte(shopMarker)) {
-		t.Fatalf("Marker fehlt in %s (Test an das Template anpassen): %v", shopTmpl, err)
+	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker} {
+		src, err := os.ReadFile(tmpl)
+		if err != nil || !bytes.Contains(src, []byte(marker)) {
+			t.Fatalf("Marker fehlt in %s (Test an das Template anpassen): %v", tmpl, err)
+		}
 	}
 
+	// Auch Pflichtmodule sind isoliert: ohne mod_content kein Content-Code.
+	const req = "mod_content mod_dashboard"
 	for _, tc := range []struct {
-		tags     string
-		wantShop bool
+		tags                  string
+		wantShop, wantContent bool
 	}{
-		{"", false},
-		{"mod_media", false},
-		{"mod_media mod_shop", true},
+		{"", false, false},
+		{req, false, true},
+		{req + " mod_media", false, true},
+		{req + " mod_media mod_shop", true, true},
+		{"mod_media mod_shop", true, false},
 	} {
 		t.Run("tags="+tc.tags, func(t *testing.T) {
 			t.Parallel()
@@ -48,7 +56,10 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 				t.Fatal("Kern-Template fehlt im Binary – Suche wäre ohne Aussagekraft")
 			}
 			if got := bytes.Contains(b, []byte(shopMarker)); got != tc.wantShop {
-				t.Fatalf("Shop-Template im Binary: %v, erwartet %v", got, tc.wantShop)
+				t.Errorf("Shop-Template im Binary: %v, erwartet %v", got, tc.wantShop)
+			}
+			if got := bytes.Contains(b, []byte(contentMarker)); got != tc.wantContent {
+				t.Errorf("Content-Template im Binary: %v, erwartet %v", got, tc.wantContent)
 			}
 		})
 	}

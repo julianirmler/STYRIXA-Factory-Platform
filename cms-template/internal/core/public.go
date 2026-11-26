@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -29,9 +30,10 @@ const (
 	PublicHome     = "home.html"
 	PublicNotFound = "404.html"
 	PublicError    = "500.html"
+	PublicContent  = "page.html" // Seite aus einem Modul (PageSource); Inhalt in .Body
 )
 
-var publicPages = []string{PublicHome, PublicNotFound, PublicError}
+var publicPages = []string{PublicHome, PublicNotFound, PublicError, PublicContent}
 
 // PublicTheme implementiert ein Modul, das die öffentlichen Seiten gestaltet.
 // PublicTemplates liefert Dateien mit den Namen oben (im Wurzelordner); eine
@@ -49,6 +51,26 @@ type PublicView struct {
 	Title     string // Seitentitel; leer = Startseite
 	Status    int
 	Data      any
+
+	// Ab Session 3.1 (Seiten aus Modulen, PublicContent):
+	Body        template.HTML // fertig gerenderter, bereinigter Inhalt
+	Description string        // Kurzbeschreibung für <meta name="description">; leer = keine
+	Path        string        // kanonischer Pfad mit führendem „/“, z. B. „/leistungen/webdesign“
+}
+
+// PublicPage ist die Antwort einer PageSource.
+type PublicPage struct {
+	View       PublicView // Title, Body, … – Lang/SiteTitle/Status setzt der Kern
+	RedirectTo string     // ≠ "": 301 auf diesen Pfad (mit führendem „/“) statt Inhalt
+}
+
+// PageSource implementiert ein Modul, das öffentliche Seiten unter frei
+// gewählten Pfaden liefert (Content). Der Kern fragt bei GET / und bei allem,
+// was keine spezifischere Route trifft, alle PageSources in Modul-Reihenfolge.
+// path hat keinen führenden „/“; "" ist die Startseite. ok = false: nicht
+// zuständig. Jede Anfrage liest neu (CGI: kein Cache als Wahrheit).
+type PageSource interface {
+	PublicPage(ctx context.Context, path string) (page PublicPage, ok bool, err error)
 }
 
 // Public rendert die öffentlichen Seiten. Templates werden einmal beim Start
@@ -56,6 +78,7 @@ type PublicView struct {
 type Public struct {
 	settings Settings
 	pages    map[string]*template.Template
+	sources  []PageSource
 }
 
 // NewPublic baut die Templates aus Kern-Standard und höchstens einem Theme.
@@ -98,6 +121,11 @@ func NewPublic(settings Settings, mods []Module) (*Public, error) {
 		return nil, fmt.Errorf("public: %s: %w", origin, err)
 	}
 	p := &Public{settings: settings, pages: map[string]*template.Template{}}
+	for _, m := range mods {
+		if ps, ok := m.(PageSource); ok {
+			p.sources = append(p.sources, ps)
+		}
+	}
 	for _, name := range publicPages {
 		src, origin, err := pick(name)
 		if err != nil {
@@ -119,11 +147,53 @@ func NewPublic(settings Settings, mods []Module) (*Public, error) {
 // keine andere Route trifft (→ 404).
 func (p *Public) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", p.home)
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { p.Error(w, r, http.StatusNotFound) })
+	mux.HandleFunc("/", p.catchAll)
 }
 
 func (p *Public) home(w http.ResponseWriter, r *http.Request) {
-	p.render(w, r, http.StatusOK, PublicHome, "")
+	if p.serveSource(w, r, "") {
+		return
+	}
+	p.render(w, r, http.StatusOK, PublicHome, PublicView{})
+}
+
+func (p *Public) catchAll(w http.ResponseWriter, r *http.Request) {
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && !isAdminPath(r.URL.Path) &&
+		p.serveSource(w, r, strings.TrimPrefix(r.URL.Path, "/")) {
+		return
+	}
+	p.Error(w, r, http.StatusNotFound)
+}
+
+// serveSource fragt die PageSources nach path und antwortet, wenn eine
+// zuständig ist (Seite oder 301).
+func (p *Public) serveSource(w http.ResponseWriter, r *http.Request, path string) bool {
+	for _, src := range p.sources {
+		page, ok, err := src.PublicPage(r.Context(), path)
+		if err != nil {
+			slog.Error("public: PageSource", "path", r.URL.Path, "err", err)
+			p.Error(w, r, http.StatusInternalServerError)
+			return true
+		}
+		if !ok {
+			continue
+		}
+		if to := page.RedirectTo; to != "" {
+			if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+				slog.Error("public: ungültiges Redirect-Ziel", "path", r.URL.Path)
+				p.Error(w, r, http.StatusInternalServerError)
+				return true
+			}
+			if r.URL.RawQuery != "" {
+				to += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, to, http.StatusMovedPermanently)
+			return true
+		}
+		p.render(w, r, http.StatusOK, PublicContent, page.View)
+		return true
+	}
+	return false
 }
 
 // Error antwortet mit der 404- oder 500-Seite (andere Status: 500-Seite mit
@@ -141,12 +211,13 @@ func (p *Public) Error(w http.ResponseWriter, r *http.Request, status int) {
 	if status == http.StatusNotFound {
 		name, title = PublicNotFound, "Seite nicht gefunden"
 	}
-	p.render(w, r, status, name, title)
+	p.render(w, r, status, name, PublicView{Title: title})
 }
 
-func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name, title string) {
+// render ergänzt v um Sprache, Seitentitel und Status und rendert name.
+func (p *Public) render(w http.ResponseWriter, r *http.Request, status int, name string, v PublicView) {
 	ctx := r.Context()
-	v := PublicView{Lang: Regions[0], Title: title, Status: status}
+	v.Lang, v.Status = Regions[0], status
 	if p.settings != nil {
 		all, err := p.settings.GetAll(ctx)
 		if err != nil {

@@ -112,7 +112,7 @@ Vorhanden – benutzen, nicht neu bauen:
 
 ## Abnahme Phase 3 (alles muss erfüllt sein)
 
-- [ ] 3.1 Renderer-Test je Blocktyp, XSS-Suite grün, Entwurf nicht öffentlich, Slug-Redirect 301
+- [x] 3.1 Renderer-Test je Blocktyp, XSS-Suite grün, Entwurf nicht öffentlich, Slug-Redirect 301
 - [ ] 3.2 Seite ohne Code im Editor bau- und sortierbar
 - [ ] 3.3 Auto-Save, Vorschau, Revision wiederherstellbar, kein Datenverlust
 - [ ] 3.4 Dashboard ohne Cookies/personenbezogene Daten
@@ -127,6 +127,6 @@ Vorhanden – benutzen, nicht neu bauen:
 
 ## Offene Fragen (vor der jeweiligen Session klären, nicht eigenmächtig entscheiden)
 
-- Seitenhierarchie (Unterseiten, `/leistungen/webdesign`) – in 3.1 nur flache Slugs. Hierarchie jetzt oder in Phase 4?
+- ~~Seitenhierarchie (Unterseiten, `/leistungen/webdesign`) – in 3.1 nur flache Slugs. Hierarchie jetzt oder in Phase 4?~~ **Entschieden 26.11.2026: jetzt (in 3.1 umgesetzt).**
 - Mehrsprachigkeit (de/en) – vorerst nicht vorgesehen.
-- Rollen: Reicht „Admin“ für alle Content-Rechte bis zum Users-Modul (Phase 4)?
+- ~~Rollen: Reicht „Admin“ für alle Content-Rechte bis zum Users-Modul (Phase 4)?~~ **Entschieden 26.11.2026: Rollenspalte `admin`/`editor` schon in 3.1; Anlegen von Editoren und Routen-Sperren mit dem Users-Modul.**

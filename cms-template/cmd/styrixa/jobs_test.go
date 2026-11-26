@@ -24,7 +24,7 @@ func TestLazyJobRunsInCGIMode(t *testing.T) {
 		t.Skip("baut ein Binary")
 	}
 	bin := filepath.Join(t.TempDir(), "styrixa")
-	build := exec.Command("go", "build", "-trimpath", "-o", bin, ".")
+	build := exec.Command("go", "build", "-trimpath", "-tags", buildTags(), "-o", bin, ".")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
@@ -78,8 +78,17 @@ func TestLazyJobRunsInCGIMode(t *testing.T) {
 		return lr, le
 	}
 
-	get()
-	lr, le := lastRun()
+	// Pro Anfrage läuft höchstens ein fälliger Job; mit Modul-Jobs (z. B.
+	// content.prune_revisions) ist core.cleanup also spätestens nach so vielen
+	// Anfragen an der Reihe, wie es Jobs gibt.
+	var lr sql.NullInt64
+	var le sql.NullString
+	for range core.RegisteredJobs() {
+		get()
+		if lr, le = lastRun(); lr.Valid {
+			break
+		}
+	}
 	if !lr.Valid || le.Valid {
 		t.Fatalf("core.cleanup nach CGI-Anfrage: last_run=%v last_error=%v", lr, le)
 	}
@@ -89,7 +98,9 @@ func TestLazyJobRunsInCGIMode(t *testing.T) {
 		t.Fatal("abgelaufene Session nicht gelöscht – Job hat nicht gearbeitet")
 	}
 
-	get() // nicht mehr fällig: läuft nicht erneut
+	for range core.RegisteredJobs() {
+		get() // alle übrigen Jobs abarbeiten; core.cleanup ist nicht mehr fällig
+	}
 	if lr2, _ := lastRun(); lr2 != lr {
 		t.Fatalf("Job erneut gelaufen: %v → %v", lr, lr2)
 	}

@@ -122,9 +122,34 @@ type sessionCtxKey struct{}
 
 type session struct {
 	UserID int64
+	Role   string
 	CSRF   string
 	hash   string
 }
+
+// Rollen der Admin-Konten (core_users.role).
+const (
+	RoleAdmin  = "admin"  // alles, inkl. Raw-HTML
+	RoleEditor = "editor" // Inhalte bearbeiten, kein Raw-HTML
+)
+
+// WithUser hängt einen angemeldeten Benutzer an ctx – so, wie es Require tut.
+// Für Tests von Modul-Handlern; im Betrieb setzt nur Require die Session.
+func WithUser(ctx context.Context, userID int64, role string) context.Context {
+	return context.WithValue(ctx, sessionCtxKey{}, &session{UserID: userID, Role: role})
+}
+
+// CurrentRole liefert die Rolle des angemeldeten Benutzers ("" = niemand).
+func CurrentRole(ctx context.Context) string {
+	if s, ok := ctx.Value(sessionCtxKey{}).(*session); ok {
+		return s.Role
+	}
+	return ""
+}
+
+// IsAdmin meldet, ob der angemeldete Benutzer Admin ist. Module prüfen damit
+// serverseitig Admin-Rechte (z. B. Raw-HTML speichern) – nie nur im UI.
+func IsAdmin(ctx context.Context) bool { return CurrentRole(ctx) == RoleAdmin }
 
 // CurrentUser liefert die ID des angemeldeten Admins (nur hinter Require).
 func CurrentUser(ctx context.Context) (int64, bool) {
@@ -225,8 +250,9 @@ func (a *Auth) lookup(r *http.Request) (*session, error) {
 	var s session
 	var lastSeen, expires int64
 	err = a.DB.QueryRowContext(ctx,
-		`SELECT user_id, csrf, last_seen, expires_at FROM core_sessions WHERE token_hash = ?`, h).
-		Scan(&s.UserID, &s.CSRF, &lastSeen, &expires)
+		`SELECT s.user_id, u.role, s.csrf, s.last_seen, s.expires_at
+		 FROM core_sessions s JOIN core_users u ON u.id = s.user_id WHERE s.token_hash = ?`, h).
+		Scan(&s.UserID, &s.Role, &s.CSRF, &lastSeen, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

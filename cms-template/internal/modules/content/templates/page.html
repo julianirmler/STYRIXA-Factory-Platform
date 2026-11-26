@@ -1,0 +1,45 @@
+<div data-styrixa-template="content-page">
+{{with .Data.Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+{{with .Data.Page}}
+<p><a href="/admin/content">← Alle Seiten</a></p>
+<p>Status: <strong>{{.Status}}</strong>{{with .PublicURL}} · <a href="{{.}}">öffentlich ansehen</a>{{end}} · zuletzt geändert {{.Updated}}</p>
+<p class="hint">Der Block-Editor folgt mit dem nächsten Update. Bis dahin speichert die Schnittstelle <code>POST /admin/content/pages/{{.ID}}/draft</code> Entwürfe als JSON.</p>
+{{end}}
+
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/settings">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<label for="slug">Adresse (letzter Teil)</label>
+	<input id="slug" name="slug" value="{{.Data.Page.Slug}}" maxlength="80" required pattern="[a-z0-9]+(-[a-z0-9]+)*" spellcheck="false">
+	<p class="hint">Aktuell <code>{{.Data.Page.Path}}</code>. Beim Ändern leitet die alte Adresse dauerhaft (301) weiter – auch für Unterseiten.</p>
+	<label for="parent_id">Elternseite</label>
+	<select id="parent_id" name="parent_id">
+		<option value="0">– oberste Ebene –</option>
+		{{- $cur := .Data.Page.ParentID}}
+		{{- range .Data.Parents}}
+		<option value="{{.ID}}"{{if eq .ID $cur}} selected{{end}}>{{.Path}}</option>
+		{{- end}}
+	</select>
+	<label><input type="checkbox" name="home" value="1"{{if .Data.Page.Home}} checked{{end}}> Als Startseite verwenden</label>
+	<button type="submit">Einstellungen speichern</button>
+</form>
+
+{{if .Data.Page.Published}}
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<button type="submit">Aktuellen Entwurf veröffentlichen</button>
+</form>
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/unpublish">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<button type="submit" class="link">Veröffentlichung zurückziehen</button>
+</form>
+{{else}}
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/publish">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<button type="submit">Veröffentlichen</button>
+</form>
+{{end}}
+<form method="post" action="/admin/content/pages/{{.Data.Page.ID}}/delete">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<button type="submit" class="link">Seite löschen</button>
+</form>
+</div>

@@ -1,8 +1,11 @@
 # STYRIXA Factory Platform – lokale Befehle (identisch zur CI)
 .PHONY: test cgo matrix ui check release-local
 
+# Pflichtmodule (modules.json „required“): ohne sie fehlen Seiten in den CMS-Tests.
+CMS_TAGS := mod_content mod_dashboard
+
 test:
-	cd cms-template && go vet ./... && go test ./...
+	cd cms-template && go vet -tags "$(CMS_TAGS)" ./... && go test -tags "$(CMS_TAGS)" ./...
 	cd factory-api && go vet ./... && go test ./...
 
 cgo:

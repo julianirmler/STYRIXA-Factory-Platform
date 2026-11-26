@@ -223,3 +223,62 @@ func TestSecurityHeadersAdmin(t *testing.T) {
 		t.Errorf("statische Admin-Datei: Cache-Control %q", got)
 	}
 }
+
+// pageModule ist ein Modul, das öffentliche Seiten liefert (wie Content).
+type pageModule struct {
+	themeModule
+	pages map[string]PublicPage
+	err   error
+	asked *[]string
+}
+
+func (m pageModule) PublicPage(_ context.Context, path string) (PublicPage, bool, error) {
+	*m.asked = append(*m.asked, path)
+	p, ok := m.pages[path]
+	return p, ok, m.err
+}
+
+// Session 3.1: Startseite und Catch-all fragen zuerst die PageSources.
+func TestPublicPageSource(t *testing.T) {
+	var asked []string
+	m := pageModule{themeModule: themeModule{id: "content"}, asked: &asked, pages: map[string]PublicPage{
+		"":          {View: PublicView{Title: "Willkommen", Body: "<p>Start</p>"}},
+		"ueber-uns": {View: PublicView{Title: "Über uns", Body: "<p>Wir <b>sind</b> da.</p>", Description: "Kurz & gut"}},
+		"alt":       {RedirectTo: "/leistungen/neu"},
+		"boese":     {RedirectTo: "//evil.example"},
+	}}
+	_, h := newTestPublic(t, m)
+	mux := h
+
+	for _, tc := range []struct {
+		method, path string
+		status       int
+		want, loc    string
+	}{
+		{"GET", "/", 200, "<h1>Willkommen</h1>\n<p>Start</p>", ""},
+		{"GET", "/ueber-uns", 200, "<p>Wir <b>sind</b> da.</p>", ""},
+		{"GET", "/ueber-uns", 200, `<meta name="description" content="Kurz &amp; gut">`, ""},
+		{"HEAD", "/ueber-uns", 200, "", ""},
+		{"GET", "/alt?x=1", 301, "", "/leistungen/neu?x=1"},
+		{"GET", "/boese", 500, "Interner Fehler", ""},
+		{"GET", "/gibtsnicht", 404, "Seite nicht gefunden", ""},
+		{"POST", "/ueber-uns", 404, "", ""},
+	} {
+		w := serve(mux, httptest.NewRequest(tc.method, tc.path, nil))
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) || w.Header().Get("Location") != tc.loc {
+			t.Errorf("%s %s: %d Location=%q\n%s", tc.method, tc.path, w.Code, w.Header().Get("Location"), w.Body)
+		}
+	}
+	asked = nil
+	serve(mux, get("/admin/irgendwas"))
+	serve(mux, httptest.NewRequest("POST", "/ueber-uns", nil))
+	if len(asked) != 0 {
+		t.Errorf("PageSource für Admin-/POST-Pfad gefragt: %v", asked)
+	}
+
+	// Ohne zuständige Quelle bleibt die Kern-Startseite.
+	_, h = newTestPublic(t, pageModule{themeModule: themeModule{id: "content"}, asked: &asked})
+	if w := serve(h, get("/")); w.Code != 200 || !strings.Contains(w.Body.String(), "Inhalte folgen in Kürze") {
+		t.Errorf("Kern-Startseite: %d %s", w.Code, w.Body)
+	}
+}

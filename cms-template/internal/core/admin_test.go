@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"regexp"
@@ -146,5 +147,52 @@ func TestAdminStatic(t *testing.T) {
 	}
 	if w := e.req("GET", "/admin/static/../auth.go", nil, reqOpt{}); w.Code == 200 {
 		t.Error("Pfad außerhalb von static ausgeliefert")
+	}
+}
+
+// Session 3.1: Die Rolle kommt bei jeder Anfrage aus core_users (kein Cache);
+// Editoren sehen nur Navigationseinträge mit Role = RoleEditor.
+func TestAdminNavByRole(t *testing.T) {
+	mods := append([]Module{
+		fakeAdminModule{id: "seiten", nav: []NavItem{{Label: "Seiten", Path: "/admin/seiten/liste", Role: RoleEditor, Order: 20}},
+			files: fstest.MapFS{"pages/liste.html": {Data: []byte(`<p data-marker="seiten">{{.Data.Name}}</p>`)}}},
+	}, testMods...)
+	e := newAuthEnv(t, mods...)
+	tok := e.login(t, reqOpt{})
+	nav := func() string {
+		w := e.req("GET", "/admin/seiten/liste", nil, reqOpt{cookie: tok})
+		if w.Code != 200 {
+			t.Fatalf("Status %d", w.Code)
+		}
+		var got []string
+		for _, m := range regexp.MustCompile(`<li><a href="(/admin[^"]*)"`).FindAllStringSubmatch(w.Body.String(), -1) {
+			got = append(got, m[1])
+		}
+		return strings.Join(got, " ")
+	}
+	if got := nav(); got != "/admin /admin/alpha/liste /admin/seiten/liste /admin/zeta/liste" {
+		t.Errorf("Admin-Navigation: %s", got)
+	}
+	if _, err := e.db.Exec(`UPDATE core_users SET role = 'editor' WHERE id = ?`, e.user); err != nil {
+		t.Fatal(err)
+	}
+	if got := nav(); got != "/admin /admin/seiten/liste" {
+		t.Errorf("Editor-Navigation: %s", got)
+	}
+	if _, err := e.db.Exec(`UPDATE core_users SET role = 'chef' WHERE id = ?`, e.user); err == nil {
+		t.Error("unbekannte Rolle wurde gespeichert")
+	}
+}
+
+func TestRoleHelpers(t *testing.T) {
+	ctx := context.Background()
+	if CurrentRole(ctx) != "" || IsAdmin(ctx) {
+		t.Error("ohne Session keine Rolle")
+	}
+	if !IsAdmin(WithUser(ctx, 1, RoleAdmin)) || IsAdmin(WithUser(ctx, 1, RoleEditor)) {
+		t.Error("IsAdmin")
+	}
+	if id, _ := CurrentUser(WithUser(ctx, 7, RoleEditor)); id != 7 {
+		t.Error("CurrentUser")
 	}
 }

@@ -290,7 +290,7 @@ func (in *Installer) install(ctx context.Context, f installForm, hash string) (e
 	if done != "" {
 		return errAlreadyInstalled
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO core_users (email, password_hash) VALUES (?, ?)`, f.Email, hash); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO core_users (email, password_hash, role) VALUES (?, ?, ?)`, f.Email, hash, RoleAdmin); err != nil {
 		return fmt.Errorf("core_users: %w", err)
 	}
 	gisa := ""

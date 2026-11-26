@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{with .Title}}{{.}} – {{end}}{{with .SiteTitle}}{{.}}{{else}}STYRIXA{{end}}</title>
+{{with .Description}}<meta name="description" content="{{.}}">
+{{end}}<title>{{with .Title}}{{.}} – {{end}}{{with .SiteTitle}}{{.}}{{else}}STYRIXA{{end}}</title>
 <style>
 body{font:17px/1.6 system-ui,sans-serif;margin:0;background:#fafafa;color:#1c1f24}
 header,main{max-width:42rem;margin:0 auto;padding:1.5rem}
