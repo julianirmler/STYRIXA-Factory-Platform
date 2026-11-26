@@ -172,7 +172,7 @@ Deploy auf die leere Test-Subdomain → `/install` → Login. Prüfen und notier
 - [ ] 2.3 Deploy ohne Simulation inkl. Fingerprint-Dialog und Install-Code-Anzeige
 - [ ] 2.3 VPS: `/install` abgeschlossen, Login ok, zweites Deploy behält Daten
 - [ ] 2.3 Webspace (mit CGI, falls vorhanden): Hoster-Check ok, `/install` abgeschlossen, Login ok, `styrixa-data/*` liefert 403
-- [ ] 2.4 Hoster-Probe auf easyname dokumentiert
+- [x] 2.4 Hoster-Probe auf easyname dokumentiert (Ergebnis: eigenes Binary nicht ausführbar → Brücke dort nicht möglich)
 - [ ] 2.4 easyname über PHP-Brücke: `/install` abgeschlossen, Login ok, Daten/Binary nicht abrufbar, Modus `php-bridge` im UI
 - [ ] 2.4 Brücken-Integrationstest (PHP-Server vs. Server-Modus) und Sicherheitstests in CI
 - [ ] `make check` und CI grün

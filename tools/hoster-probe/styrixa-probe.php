@@ -74,7 +74,7 @@ $r['mod_rewrite'] = function_exists('apache_get_modules')
     ? (in_array('mod_rewrite', apache_get_modules(), true) ? 'ja' : 'NEIN')
     : 'unbekannt (PHP-FPM – wird beim Deploy getestet)';
 
-$ok = $r['exec_own_binary'] === 'ja' && $r['sqlite_wal'] !== 'NEIN';
+$ok = $r['exec_own_binary'] === 'ja' && strncmp($r['sqlite_wal'], 'NEIN', 4) !== 0;
 echo "STYRIXA Hoster-Probe\n====================\n";
 foreach ($r as $k => $v) { printf("%-20s %s\n", $k . ':', $v); }
 echo "\nErgebnis: " . ($ok ? "PHP-Brücke möglich ✓" : "PHP-Brücke NICHT möglich ✗") . "\n";

@@ -137,6 +137,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
   - *Stand 26.11.2026:* FTPS-Upload zu easyname läuft (Fixes: TLS-Handshake auf dem Datenkanal vor `150`, sauberes Schließen gegen „450 Transfer aborted“, Prüfung der Website-URL vor dem CGI-Test). Ergebnis: **easyname-Webhosting erlaubt kein CGI** → Webspace-Abnahme wandert nach 2.4.
 - [ ] **2.4** PHP-Brücke für Webspaces ohne CGI (ADR-012), Ziel **easyname**: Hoster-Probe, `index.php`-Brücke, Hoster-Check wählt CGI → PHP-Brücke → Diagnose, Binary/Daten außerhalb des Document-Roots
   - *Abnahme:* CMS läuft auf easyname-Webhosting über die Brücke, `/install` abgeschlossen, `styrixa-data/*` und das Binary nicht abrufbar; Brücken-Test (PHP-Server) = Server-Modus in CI
+  - *Hoster-Probe easyname 26.11.2026 (Webhosting, Test-Subdomain):* PHP 8.3 FPM, Linux x86_64, `proc_open` ja, Systembefehle (`/bin/echo`) ja, **eigenes Binary im Webspace: NEIN** (Start verweigert – vermutlich `noexec`-Mount), `sqlite_wal` ja, `open_basedir` = Subdomain-Ordner + phpsession/phptmp/`/tmp`/`/usr/bin`, `max_execution_time` 300 s. → **Tarif für die PHP-Brücke ungeeignet; angehalten, keine Umgehung.** Nebenbefund: Wegen `open_basedir` läge auch ein Geschwisterordner außerhalb des Document-Roots nicht im erlaubten Bereich. Probe-Fix: Ein fehlgeschlagener WAL-Test (`NEIN (…)`) hat zuvor fälschlich „möglich“ ergeben.
 
 **M2:** Ende-zu-Ende: auswählen → deployen → installieren.
 
