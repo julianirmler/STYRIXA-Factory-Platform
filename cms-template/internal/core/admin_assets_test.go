@@ -81,3 +81,41 @@ func TestAdminStyleNonce(t *testing.T) {
 		t.Errorf("ohne StyleNonce: %q\n%s", w.Header().Get("Content-Security-Policy"), w.Body)
 	}
 }
+
+// extModule hängt ein eigenes Skript an den Editor-Punkt eines anderen
+// Moduls (Media → Content, Session 4.1).
+type extModule struct {
+	fakeAdminModule
+	exts map[string][]string
+}
+
+func (extModule) Assets() fs.FS {
+	return fstest.MapFS{"picker.js": {Data: []byte("// picker")}, "picker.css": {Data: []byte("p{}")}}
+}
+func (m extModule) AdminExtensions() map[string][]string { return m.exts }
+
+func TestAdminExtensions(t *testing.T) {
+	ext := extModule{fakeAdminModule{id: "med"}, map[string][]string{ExtEditor: {"picker.js", "picker.css"}}}
+	page := assetModule{fakeAdminModule{id: "ed", files: fstest.MapFS{"seite.html": {Data: []byte(
+		`{{range extensions "editor"}}{{if .Style}}<link href="{{.URL}}">{{else}}<script src="{{.URL}}" defer></script>{{end}}{{end}}|{{range extensions "anderer"}}X{{end}}`)}}}}
+
+	e := newAuthEnv(t, page, ext)
+	tok := e.login(t, reqOpt{})
+	body := e.req("GET", "/admin/ed/seite", nil, reqOpt{cookie: tok}).Body.String()
+	if !regexp.MustCompile(`<script src="/admin/static/med-picker\.[0-9a-f]{10}\.js" defer></script><link href="/admin/static/med-picker\.[0-9a-f]{10}\.css">\|`).MatchString(body) {
+		t.Fatalf("Erweiterungsskript fehlt oder unbekannter Punkt nicht leer:\n%s", body)
+	}
+
+	// Ohne Erweiterungsmodul: Punkt leer, Seite rendert trotzdem.
+	e = newAuthEnv(t, page)
+	tok = e.login(t, reqOpt{})
+	if body := e.req("GET", "/admin/ed/seite", nil, reqOpt{cookie: tok}).Body.String(); strings.Contains(body, "<script src=\"/admin/static/med") {
+		t.Errorf("Skript ohne Modul:\n%s", body)
+	}
+
+	// Unbekanntes Asset → Fehler beim Start statt toter Verweis.
+	bad := extModule{fakeAdminModule{id: "med"}, map[string][]string{ExtEditor: {"fehlt.js"}}}
+	if _, err := NewAdmin(nil, nil, []Module{bad}); err == nil {
+		t.Error("unbekanntes Erweiterungs-Asset ohne Fehler")
+	}
+}

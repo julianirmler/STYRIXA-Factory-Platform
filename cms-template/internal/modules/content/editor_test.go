@@ -164,7 +164,7 @@ func TestEditorOutputRoundTrip(t *testing.T) {
 		`<ol><li>Massivholz<ol><li>Eiche</li></ol></li><li>Montage</li></ol>`,
 		`<figure><blockquote><p>Holz lebt.</p></blockquote><figcaption>Meister</figcaption></figure>`,
 		`<hr>`,
-		`<figure><img src="/media/werkstatt.webp" alt="Hobelbank" loading="lazy"><figcaption>In <b>Graz</b></figcaption></figure>`,
+		`<figure><img src="/media/werkstatt.webp" alt="Hobelbank" loading="lazy" decoding="async"><figcaption>In <b>Graz</b></figcaption></figure>`,
 		`<summary>Wie lange dauert es?</summary><div><b>Meist</b> zwei Wochen.</div>`,
 		`<h2 id="was-kostet-ein-tisch">Was kostet ein Tisch?</h2><p class="answer-short">Ab 1.800 Euro.</p>`,
 		`<a class="cta-button" href="/kontakt">Jetzt anfragen</a>`,

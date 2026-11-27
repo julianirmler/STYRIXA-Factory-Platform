@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Blockformat = Ausgabe von Editor.js: {time, blocks:[{id, type, data}], version}.
@@ -55,6 +56,15 @@ type (
 		URL     string `json:"url"` // einfache Variante ohne file-Objekt
 		Caption string `json:"caption"`
 		Alt     string `json:"alt"`
+		// Ab Session 4.1 (Bild aus der Mediathek): Maße der url-Variante und
+		// alle Varianten für srcset. Fehlen sie, bleibt es ein einfaches <img>.
+		Width    int            `json:"width,omitempty"`
+		Height   int            `json:"height,omitempty"`
+		Variants []imageVariant `json:"variants,omitempty"`
+	}
+	imageVariant struct {
+		URL   string `json:"url"`
+		Width int    `json:"width"`
 	}
 	rawData struct {
 		HTML string `json:"html"`
@@ -202,7 +212,10 @@ func decodeBlock(b Block) (any, error) {
 		return struct{}{}, nil
 	case "image":
 		var d imageData
-		return d, dec(&d)
+		if err := dec(&d); err != nil {
+			return nil, err
+		}
+		return d, checkImage(d)
 	case "raw":
 		var d rawData
 		return d, dec(&d)
@@ -233,6 +246,39 @@ func decodeBlock(b Block) (any, error) {
 		return nil, badInput("Ein Block hat keinen Typ.")
 	}
 	return nil, badInput("Unbekannter Blocktyp „%s“ – der Inhalt wurde nicht gespeichert.", b.Type)
+}
+
+// Grenzen für Bilder aus der Mediathek (Session 4.1).
+const (
+	maxImageVariants = 3
+	maxImageSide     = 10000
+)
+
+// checkImage prüft Maße und Varianten: höchstens drei, jede ein eigener Pfad
+// (/…, kein //), Breiten 1–10000 und verschieden; Breite und Höhe nur
+// gemeinsam.
+func checkImage(d imageData) error {
+	if (d.Width == 0) != (d.Height == 0) || d.Width < 0 || d.Height < 0 || d.Width > maxImageSide || d.Height > maxImageSide {
+		return badInput("Die Bildmaße sind ungültig.")
+	}
+	if len(d.Variants) > maxImageVariants {
+		return badInput("Ein Bild hat höchstens %d Größen.", maxImageVariants)
+	}
+	seen := map[int]bool{}
+	for _, v := range d.Variants {
+		if !ownPath(v.URL) || v.Width < 1 || v.Width > maxImageSide || seen[v.Width] {
+			return badInput("Die Bildgrößen sind ungültig – bitte das Bild erneut aus der Mediathek wählen.")
+		}
+		seen[v.Width] = true
+	}
+	return nil
+}
+
+// ownPath: Pfad auf dieser Website (/…, nicht //…), ohne Leerzeichen und
+// Kommas (srcset-Trenner).
+func ownPath(u string) bool {
+	v, ok := safeImageURL(u)
+	return ok && v == u && strings.HasPrefix(u, "/") && !strings.HasPrefix(u, "//") && !strings.ContainsAny(u, " ,\t\n\r")
 }
 
 func listDepth(items []listItem) int {

@@ -1,6 +1,7 @@
 /* STYRIXA – eigene Editor.js-Blöcke (Vanilla-JS, kein Build-Schritt).
  *
- * Bild (URL-Eingabe, Upload folgt mit dem Media-Modul), FAQ, Answer-First,
+ * Bild (URL-Eingabe; mit mod_media zusätzlich „Aus Mediathek wählen“ über
+ * window.StyrixaMediaPicker, siehe core.ExtEditor), FAQ, Answer-First,
  * Call-to-Action und eine Liste ohne Checkliste. Die gespeicherten Daten
  * entsprechen den Strukturen in blocks.go; der Server prüft sie (Validate)
  * und bereinigt Inline-HTML beim Ausliefern (SanitizeInline).
@@ -81,6 +82,8 @@
 		this.api = opts.api;
 		this.readOnly = opts.readOnly;
 		this.data = { url: d.url || (d.file && d.file.url) || "", alt: d.alt || "", caption: d.caption || "" };
+		// Aus der Mediathek: Maße und Varianten für srcset (gelten nur für genau diese URL).
+		this.media = d.variants && d.variants.length ? { url: this.data.url, width: d.width, height: d.height, variants: d.variants } : null;
 	}
 	ImageBlock.toolbox = { title: "Bild", icon: icon('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>') };
 	ImageBlock.enableLineBreaks = true;
@@ -110,11 +113,35 @@
 		};
 		this.url.addEventListener("input", update);
 		update();
-		w.append(this.url, hint, preview, this.alt, this.caption);
+		w.appendChild(this.url);
+		if (window.StyrixaMediaPicker && !this.readOnly) {
+			w.appendChild(button("Aus Mediathek wählen", function () {
+				window.StyrixaMediaPicker.pick().then(function (p) {
+					if (!p) {
+						return;
+					}
+					self.media = p;
+					self.url.value = p.url;
+					if (!self.alt.value.trim()) {
+						self.alt.value = p.alt || "";
+					}
+					update();
+					self.url.dispatchEvent(new Event("input", { bubbles: true })); // Änderung für Auto-Save melden
+				});
+			}));
+		}
+		w.append(hint, preview, this.alt, this.caption);
 		return w;
 	};
 	ImageBlock.prototype.save = function () {
-		return { url: this.url.value.trim(), alt: this.alt.value.trim(), caption: clean(this.api, this.caption.innerHTML) };
+		var out = { url: this.url.value.trim(), alt: this.alt.value.trim(), caption: clean(this.api, this.caption.innerHTML) };
+		var m = this.media;
+		if (m && m.url === out.url) { // URL von Hand geändert → Varianten passen nicht mehr
+			out.width = m.width;
+			out.height = m.height;
+			out.variants = m.variants.map(function (v) { return { url: v.url, width: v.width }; });
+		}
+		return out;
 	};
 
 	/* ---------- FAQ ---------- */

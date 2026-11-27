@@ -139,3 +139,12 @@ func init() {
 		return err
 	})
 }
+
+// MediaRefs implementiert core.MediaReferrer: Titel aller Seiten, deren
+// Entwurf (neueste Revision) oder veröffentlichte Fassung urlPrefix enthält.
+func (m *module) MediaRefs(ctx context.Context, urlPrefix string) ([]string, error) {
+	if m.st == nil || urlPrefix == "" {
+		return nil, nil
+	}
+	return m.st.mediaRefs(ctx, urlPrefix)
+}

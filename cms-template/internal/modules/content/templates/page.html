@@ -120,6 +120,10 @@
 <script src="{{asset "content/editorjs-marker-1.4.0.umd.js"}}" defer></script>
 <script src="{{asset "content/editorjs-inline-code-1.5.2.umd.js"}}" defer></script>
 {{if .Data.Editor.AllowRaw}}<script src="{{asset "content/editorjs-raw-2.5.1.umd.js"}}" defer></script>{{end}}
+{{- /* Erweiterungen anderer Module, z. B. der Bildwähler der Mediathek (core.ExtEditor) */}}
+{{range extensions "editor"}}{{if .Style}}<link rel="stylesheet" href="{{.URL}}">
+{{else}}<script src="{{.URL}}" defer></script>
+{{end}}{{end -}}
 <script src="{{asset "content/editor-blocks.js"}}" defer></script>
 {{end}}
 <script src="{{asset "content/editor.js"}}" defer></script>

@@ -3,6 +3,7 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -25,6 +26,16 @@ type Deps struct {
 	Settings Settings        // Einstellungen aus core_settings; nil nur in Tests
 	Admin    AdminRenderer   // Admin-Layout für Modulseiten; nil nur in Tests
 	Public   PublicPreviewer // öffentliches Layout für Vorschauen (ab 3.3); nil nur in Tests
+	DataDir  string          // Datenordner (STYRIXA_DATA) für Dateien der Module, z. B. Medien (ab 4.1)
+	Modules  []Module        // alle Module im Binary – für Typ-Assertions auf Kern-Schnittstellen (ab 4.1)
+}
+
+// MediaReferrer implementiert ein Modul, das Medien-URLs in eigenen Inhalten
+// verwendet (Content, Session 4.1). Die Mediathek fragt vor dem Löschen nach,
+// wo eine Datei noch vorkommt. url ist ein Pfad wie „/media/<key>-“ (Präfix);
+// das Ergebnis sind lesbare Fundstellen, z. B. Seitentitel.
+type MediaReferrer interface {
+	MediaRefs(ctx context.Context, urlPrefix string) ([]string, error)
 }
 
 // Module ist der Vertrag zwischen Kern und Modul.

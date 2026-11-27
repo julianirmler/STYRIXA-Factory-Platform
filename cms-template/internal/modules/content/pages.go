@@ -628,3 +628,28 @@ func (s *store) latestDraft(ctx context.Context, id int64) (draft, error) {
 	}
 	return d, err
 }
+
+// mediaRefs: Titel der Seiten, deren neueste oder veröffentlichte Revision
+// needle enthält (Medien-URL, Session 4.1). instr statt LIKE: kein Escapen
+// von % und _ nötig.
+func (s *store) mediaRefs(ctx context.Context, needle string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT p.title FROM content_pages p
+		 WHERE EXISTS (SELECT 1 FROM content_revisions r WHERE r.page_id = p.id
+		   AND (r.id = p.published_revision_id OR r.id = (SELECT max(id) FROM content_revisions WHERE page_id = p.id))
+		   AND instr(r.body, ?) > 0)
+		 ORDER BY p.path`, needle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

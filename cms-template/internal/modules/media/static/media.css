@@ -1,0 +1,35 @@
+/* STYRIXA – Mediathek und Bildwähler (Session 4.1). Ergänzt admin.css. */
+.media section { margin-top: 1.5rem; }
+.media h2, .media-picker h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
+.media-trail { margin: .5rem 0; }
+.media-trail a[aria-current="page"] { font-weight: 600; color: inherit; text-decoration: none; }
+.media-upload { display: grid; gap: .4rem; max-width: 36rem; padding: 1rem;
+	border: 1px dashed var(--line); border-radius: var(--radius); }
+.media-upload button { justify-self: start; }
+.media-inline, .media-search { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; margin: .75rem 0; }
+.media-inline input, .media-search input { max-width: 20rem; }
+label.check { display: flex; align-items: center; gap: .4rem; font-weight: 400; }
+.media-folders { display: flex; flex-wrap: wrap; gap: .5rem 1rem; list-style: none; padding: 0; margin: .5rem 0; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 1rem;
+	list-style: none; padding: 0; margin: .5rem 0; }
+.media-grid li { display: grid; gap: .25rem; min-width: 0; }
+.media-grid a, .media-pick { display: grid; gap: .25rem; color: inherit; text-decoration: none; }
+.media-grid img { width: 100%; height: 8rem; object-fit: cover; border-radius: var(--radius);
+	background: var(--line); }
+.media-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9rem; }
+.media-preview img { max-width: 100%; height: auto; max-height: 24rem; border-radius: var(--radius); }
+.media-urls { list-style: none; padding: 0; }
+button.danger { color: var(--danger); }
+
+/* Bildwähler-Dialog */
+.media-picker { width: min(56rem, calc(100vw - 2rem)); max-height: calc(100vh - 4rem); padding: 1rem 1.25rem;
+	border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); }
+.media-picker::backdrop { background: rgb(0 0 0 / .45); }
+.media-picker__head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+.media-picker__search { width: 100%; max-width: none; margin: .5rem 0; }
+.media-picker__upload { display: grid; gap: .4rem; margin: .5rem 0; }
+.media-picker__upload[open] { padding: .75rem; border: 1px dashed var(--line); border-radius: var(--radius); }
+.media-pick { padding: 0; font: inherit; font-weight: 400; text-align: left; background: none;
+	border: 2px solid transparent; border-radius: var(--radius); cursor: pointer; }
+.media-pick:hover, .media-pick:focus-visible { border-color: var(--accent); }
+.media-picker [hidden] { display: none; }

@@ -56,6 +56,32 @@ type AdminAssets interface {
 	Assets() fs.FS
 }
 
+// ExtEditor ist der Erweiterungspunkt der Editor-Seite (Content). Ein Skript
+// an diesem Punkt darf window.StyrixaMediaPicker setzen:
+//
+//	{ pick(): Promise<Bild | null> }
+//	Bild = {url, alt, width, height, variants: [{url, width}]}
+//
+// Der Bild-Block bietet dann „Aus Mediathek wählen“ an (Media, Session 4.1).
+const ExtEditor = "editor"
+
+// AdminExtensions implementiert ein Modul, das Skripte an Erweiterungspunkte
+// fremder Admin-Seiten hängt, ohne dass sich die Module kennen. Die Werte
+// sind Namen eigener Assets (AdminAssets, ohne „<id>/“), z. B.
+// {core.ExtEditor: {"media-picker.js", "media.css"}}. Im Template der Seite:
+//
+//	{{range extensions "editor"}}{{if .Style}}<link rel="stylesheet" href="{{.URL}}">
+//	{{else}}<script src="{{.URL}}" defer></script>{{end}}{{end}}
+type AdminExtensions interface {
+	AdminExtensions() map[string][]string
+}
+
+// ExtAsset ist eine Datei an einem Erweiterungspunkt.
+type ExtAsset struct {
+	URL   string
+	Style bool // .css → <link rel="stylesheet">, sonst <script>
+}
+
 // AdminRenderer rendert eine Seite im Admin-Layout. Module erhalten ihn über
 // Deps.Admin; er ist nil, wenn kein Admin gemountet ist (Tests).
 type AdminRenderer interface {
@@ -102,6 +128,7 @@ type Admin struct {
 	pages    map[string]*template.Template
 	assets   map[string]adminAsset // URL-Dateiname → Inhalt
 	urls     map[string]string     // Quelldateiname → URL
+	exts     map[string][]ExtAsset // Erweiterungspunkt → Dateien (AdminExtensions)
 	home     string                // ID des Moduls mit AdminHome, "" = Kern-Startseite
 }
 
@@ -130,6 +157,22 @@ func NewAdmin(db *sql.DB, settings Settings, mods []Module) (*Admin, error) {
 	if err := a.loadAssets(mods); err != nil {
 		return nil, err
 	}
+	a.exts = map[string][]ExtAsset{}
+	for _, m := range mods {
+		ae, ok := m.(AdminExtensions)
+		if !ok {
+			continue
+		}
+		for point, files := range ae.AdminExtensions() {
+			for _, f := range files {
+				u, err := a.assetURL(m.ID() + "/" + f)
+				if err != nil {
+					return nil, fmt.Errorf("admin: Erweiterung %q von %s: %w", point, m.ID(), err)
+				}
+				a.exts[point] = append(a.exts[point], ExtAsset{URL: u, Style: path.Ext(f) == ".css"})
+			}
+		}
+	}
 
 	a.nav = []NavItem{{Label: "Übersicht", Path: "/admin", Role: RoleEditor, Order: 0}}
 	for _, m := range mods {
@@ -137,7 +180,7 @@ func NewAdmin(db *sql.DB, settings Settings, mods []Module) (*Admin, error) {
 	}
 	sort.SliceStable(a.nav, func(i, j int) bool { return a.nav[i].Order < a.nav[j].Order })
 
-	layout, err := template.New("layout.html").Funcs(template.FuncMap{"asset": a.assetURL}).
+	layout, err := template.New("layout.html").Funcs(template.FuncMap{"asset": a.assetURL, "extensions": a.extensionURLs}).
 		ParseFS(adminFS, "admin/templates/layout.html")
 	if err != nil {
 		return nil, fmt.Errorf("admin: Layout: %w", err)
@@ -248,6 +291,10 @@ func (a *Admin) assetURL(name string) (string, error) {
 	}
 	return u, nil
 }
+
+// extensionURLs liefert die Dateien aller Module an einem Erweiterungspunkt
+// (Modul-Reihenfolge); leer, wenn niemand ihn nutzt.
+func (a *Admin) extensionURLs(point string) []ExtAsset { return a.exts[point] }
 
 // Mount registriert Startseite und statische Dateien.
 func (a *Admin) Mount(mux *http.ServeMux) {

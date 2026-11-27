@@ -139,11 +139,33 @@ func (r *renderer) image(d imageData) {
 	if !ok {
 		return // nur /… oder https:// – sonst Block auslassen
 	}
-	r.w(`<figure><img src="`, html.EscapeString(src), `" alt="`, html.EscapeString(strings.TrimSpace(d.Alt)), `" loading="lazy">`)
+	r.w(`<figure><img src="`, html.EscapeString(src), `"`)
+	if set := srcset(d.Variants); set != "" {
+		r.w(` srcset="`, html.EscapeString(set), `" sizes="(min-width: 48rem) 42rem, 100vw"`)
+	}
+	if d.Width > 0 && d.Height > 0 {
+		r.w(` width="`, strconv.Itoa(d.Width), `" height="`, strconv.Itoa(d.Height), `"`)
+	}
+	r.w(` alt="`, html.EscapeString(strings.TrimSpace(d.Alt)), `" loading="lazy" decoding="async">`)
 	if c := SanitizeInline(d.Caption); plainText(c) != "" {
 		r.w("<figcaption>", c, "</figcaption>")
 	}
 	r.w("</figure>\n")
+}
+
+// srcset baut „/a-480.webp 480w, …“ aus geprüften Varianten (ownPath);
+// ungültige werden übersprungen, eine einzelne Variante braucht kein srcset.
+func srcset(vs []imageVariant) string {
+	var parts []string
+	for _, v := range vs {
+		if ownPath(v.URL) && v.Width > 0 && v.Width <= maxImageSide {
+			parts = append(parts, v.URL+" "+strconv.Itoa(v.Width)+"w")
+		}
+	}
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (r *renderer) faqBlock(d faqData) {

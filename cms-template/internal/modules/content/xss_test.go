@@ -98,6 +98,16 @@ func TestValidateSecurity(t *testing.T) {
 		{"Liste Tiefe 3", `{"blocks":[{"type":"list","data":{"style":"unordered","items":[{"content":"1","items":[{"content":"2","items":[{"content":"3"}]}]}]}}]}`, FormatBlocks, true, "", false},
 		{"Checkliste", `{"blocks":[{"type":"list","data":{"style":"checklist","items":[]}}]}`, FormatBlocks, true, "Listenart", false},
 		{"CTA javascript", `{"blocks":[{"type":"cta","data":{"text":"x","label":"Los","url":"javascript:alert(1)"}}]}`, FormatBlocks, true, "nicht erlaubt", false},
+		{"Bild mit Varianten", `{"blocks":[{"type":"image","data":{"url":"/media/a-960.webp","alt":"x","width":960,"height":640,"variants":[{"url":"/media/a-480.webp","width":480},{"url":"/media/a-960.webp","width":960}]}}]}`, FormatBlocks, true, "", false},
+		{"Bild Variante extern", `{"blocks":[{"type":"image","data":{"url":"/media/a-960.webp","variants":[{"url":"https://evil.example/a.webp","width":480}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild Variante //", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"//evil.example/a.webp","width":480}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild Variante javascript", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"javascript:alert(1)","width":480}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild Variante mit Komma (srcset-Ausbruch)", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"/a.webp 1w, /b.webp","width":480}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild Variante Breite 0", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"/a.webp","width":0}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild Variante doppelt", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"/a.webp","width":480},{"url":"/b.webp","width":480}]}}]}`, FormatBlocks, true, "Bildgrößen sind ungültig", false},
+		{"Bild zu viele Varianten", `{"blocks":[{"type":"image","data":{"url":"/a","variants":[{"url":"/1","width":1},{"url":"/2","width":2},{"url":"/3","width":3},{"url":"/4","width":4}]}}]}`, FormatBlocks, true, "höchstens 3", false},
+		{"Bild nur Breite", `{"blocks":[{"type":"image","data":{"url":"/a","width":960}}]}`, FormatBlocks, true, "Bildmaße", false},
+		{"Bild negative Höhe", `{"blocks":[{"type":"image","data":{"url":"/a","width":960,"height":-1}}]}`, FormatBlocks, true, "Bildmaße", false},
 		{"Answer ohne Antwort", `{"blocks":[{"type":"answer","data":{"question":"Was?"}}]}`, FormatBlocks, true, "Frage und Kurzantwort", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

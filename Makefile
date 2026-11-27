@@ -23,7 +23,7 @@ matrix:
 ui:
 	cd factory-ui && npm ci && npm run build && npm test
 	# Eigene Editor-Skripte des CMS (ohne Build-Schritt): nur Syntax prüfen.
-	for f in cms-template/internal/modules/content/static/editor*.js; do node --check "$$f" || exit 1; done
+	for f in cms-template/internal/modules/content/static/editor*.js cms-template/internal/modules/media/static/*.js; do node --check "$$f" || exit 1; done
 
 check: test smoke cgo matrix ui
 	@test -z "$$(gofmt -l cms-template factory-api)" || (gofmt -l cms-template factory-api; echo "gofmt!"; exit 1)

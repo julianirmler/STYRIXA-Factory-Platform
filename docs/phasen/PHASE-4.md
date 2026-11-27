@@ -143,7 +143,7 @@ Vorhanden – benutzen, nicht neu bauen:
 
 ## Abnahme Phase 4 (alles muss erfüllt sein)
 
-- [ ] 4.1 Upload mit Varianten, Prüfung, `srcset`, Bildwähler im Editor
+- [x] 4.1 Upload mit Varianten, Prüfung, `srcset`, Bildwähler im Editor
 - [ ] 4.2 Meta-Felder, Sitemap, robots.txt, Redirects, Search-Console-Tag
 - [ ] 4.3 JSON-LD gültig, `llms.txt`, Answer-First-Hinweis
 - [ ] 4.4 Rollen je Route, TOTP mit RFC-Testvektoren, Aktivitätsprotokoll

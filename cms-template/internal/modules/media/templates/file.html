@@ -1,0 +1,59 @@
+<div data-styrixa-template="media-file" class="media">
+{{with .Data.Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+<nav class="media-trail" aria-label="Ordnerpfad">
+	<a href="/admin/media">Alle Medien</a>
+	{{- range .Data.Trail}} / <a href="/admin/media?folder={{.ID}}">{{.Name}}</a>{{end}}
+</nav>
+
+{{with .Data.File}}
+<figure class="media-preview">
+	<img src="{{.URL}}" alt="" width="{{.Width}}" height="{{.Height}}">
+	<figcaption class="hint">Größte Fassung {{.FullWidth}} × {{.FullHeight}} px · {{.Size}} gesamt</figcaption>
+</figure>
+{{end}}
+
+<form method="post" action="/admin/media/files/{{.Data.File.ID}}">
+	<input type="hidden" name="csrf" value="{{.CSRF}}">
+	<label for="name">Name</label>
+	<input id="name" name="name" maxlength="120" value="{{.Data.Name}}">
+	<label for="alt">Alternativtext</label>
+	<input id="alt" name="alt" maxlength="250" value="{{.Data.Alt}}" placeholder="Was zeigt das Bild?">
+	<label class="check"><input type="checkbox" name="decorative" value="1"{{if .Data.Decorative}} checked{{end}}> Dekoratives Bild (kein Alternativtext)</label>
+	<label for="folder_id">Ordner</label>
+	<select id="folder_id" name="folder_id">
+		<option value="0">– Alle Medien (oberste Ebene) –</option>
+		{{- range .Data.Folders}}
+		<option value="{{.ID}}"{{if eq .ID $.Data.FolderID}} selected{{end}}>{{.Label}}</option>
+		{{- end}}
+	</select>
+	<button type="submit">Speichern</button>
+	<p class="hint">Neuer Alternativtext gilt für neu eingefügte Bilder; bereits eingefügte Bild-Blöcke behalten ihren Text.</p>
+</form>
+
+<section aria-labelledby="media-urls-h">
+	<h2 id="media-urls-h">Adressen</h2>
+	<ul class="media-urls">
+	{{- range .Data.Variants}}
+		<li><code>{{.URL}}</code> <span class="hint">{{.Width}} px</span></li>
+	{{- end}}
+	</ul>
+	<p class="hint">Hochgeladen am {{.Data.Created}}.</p>
+</section>
+
+<section aria-labelledby="media-use-h">
+	<h2 id="media-use-h">Verwendung</h2>
+	{{if .Data.RefsError}}<p class="err">Die Verwendung konnte nicht geprüft werden.</p>
+	{{else if .Data.Refs}}
+	<p>Dieses Bild wird verwendet in:</p>
+	<ul>{{range .Data.Refs}}<li>{{.}}</li>{{end}}</ul>
+	{{else}}<p class="hint">In keiner Seite gefunden.</p>{{end}}
+	{{if .Data.IsAdmin}}
+	<form method="post" action="/admin/media/files/{{.Data.File.ID}}/delete" data-confirm="{{if .Data.Refs}}Das Bild wird noch verwendet und fehlt danach auf diesen Seiten. {{end}}Bild endgültig löschen? Das lässt sich nicht rückgängig machen.">
+		<input type="hidden" name="csrf" value="{{.CSRF}}">
+		<button type="submit" class="link danger">Bild löschen</button>
+	</form>
+	{{end}}
+</section>
+</div>
+<link rel="stylesheet" href="{{asset "media/media.css"}}">
+<script src="{{asset "media/media-library.js"}}" defer></script>

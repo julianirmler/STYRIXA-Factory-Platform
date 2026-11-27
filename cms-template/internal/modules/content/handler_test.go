@@ -421,3 +421,43 @@ func hasJob(name string) bool {
 	}
 	return false
 }
+
+// Session 4.1: Die Mediathek fragt vor dem Löschen, wo ein Bild vorkommt –
+// im aktuellen Entwurf oder in der veröffentlichten Fassung, nicht in alten Revisionen.
+func TestMediaRefs(t *testing.T) {
+	e := newEnv(t)
+	img := func(key string) string {
+		return `{"type":"image","data":{"url":"/media/` + key + `-960.webp","alt":"x","width":960,"height":640,"variants":[{"url":"/media/` + key + `-480.webp","width":480},{"url":"/media/` + key + `-960.webp","width":960}]}}`
+	}
+	a := e.create("Über uns", 0)
+	e.mustDraft(a, "Über uns", img("aaaa"))
+	e.mustPost(a, "publish")
+	e.mustDraft(a, "Über uns", para) // Entwurf ohne Bild, veröffentlicht noch mit
+	b := e.create("Team", 0)
+	e.mustDraft(b, "Team", img("bbbb"))
+	e.mustDraft(b, "Team", para) // nur eine alte Revision enthält bbbb
+	c := e.create("Kontakt", 0)
+	e.mustDraft(c, "Kontakt", img("aaaa"))
+
+	ctx := context.Background()
+	for _, tc := range []struct {
+		prefix string
+		want   string
+	}{
+		{"/media/aaaa-", "Kontakt|Über uns"},
+		{"/media/bbbb-", ""},
+		{"/media/cccc-", ""},
+	} {
+		got, err := e.m.MediaRefs(ctx, tc.prefix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got, "|") != tc.want {
+			t.Errorf("%s: %q, erwartet %q", tc.prefix, got, tc.want)
+		}
+	}
+	// Öffentlich mit srcset (Rundlauf über Speichern und Veröffentlichen).
+	e.mustDraft(c, "Kontakt", img("cccc"))
+	e.mustPost(c, "publish")
+	e.expect("/kontakt", 200, "", `srcset="/media/cccc-480.webp 480w, /media/cccc-960.webp 960w"`)
+}

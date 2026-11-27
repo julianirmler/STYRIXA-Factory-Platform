@@ -161,7 +161,7 @@ func newHandler(db *sql.DB, dataDir string, mods []core.Module) (http.Handler, *
 		return nil, nil, err
 	}
 	public.Mount(mux) // Startseite + 404 für alles, was keine andere Route trifft
-	deps := core.Deps{DB: db, Settings: settings, Admin: admin, Public: public}
+	deps := core.Deps{DB: db, Settings: settings, Admin: admin, Public: public, DataDir: dataDir, Modules: mods}
 	for _, m := range mods {
 		m.Mount(mux, deps)
 	}

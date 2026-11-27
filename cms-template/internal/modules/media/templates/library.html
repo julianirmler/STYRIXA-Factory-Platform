@@ -1,0 +1,84 @@
+<div data-styrixa-template="media-library" class="media">
+{{with .Data.Error}}<p class="err" role="alert">{{.}}</p>{{end}}
+
+<nav class="media-trail" aria-label="Ordnerpfad">
+	<a href="/admin/media"{{if not .Data.Trail}} aria-current="page"{{end}}>Alle Medien</a>
+	{{- range $i, $f := .Data.Trail}} / <a href="/admin/media?folder={{$f.ID}}"{{if eq $f.ID $.Data.Folder}} aria-current="page"{{end}}>{{$f.Name}}</a>{{end}}
+</nav>
+
+<section class="media-upload" aria-labelledby="media-upload-h" data-media-upload data-folder="{{.Data.Folder}}" data-csrf="{{.CSRF}}">
+	<h2 id="media-upload-h">Bild hochladen</h2>
+	<p class="hint">JPEG, PNG oder WebP. Das Bild wird im Browser auf höchstens 1920 px Breite verkleinert und als WebP (Safari: JPEG) gespeichert.</p>
+	<label for="media-file">Datei</label>
+	<input id="media-file" type="file" accept="image/jpeg,image/png,image/webp" required>
+	<label for="media-alt">Alternativtext</label>
+	<input id="media-alt" maxlength="250" placeholder="Was zeigt das Bild? z. B. Weinberg im Herbst bei Sonnenuntergang">
+	<label class="check"><input id="media-decorative" type="checkbox" value="1"> Dekoratives Bild (ohne Aussage, kein Alternativtext nötig)</label>
+	<button type="button" data-media-upload-start>Hochladen</button>
+	<p class="hint" role="status" data-media-upload-status></p>
+	<noscript><p class="err">Zum Hochladen wird JavaScript benötigt (das Bild wird im Browser verkleinert).</p></noscript>
+</section>
+
+<form method="get" action="/admin/media" class="media-search" role="search">
+	<label for="media-q">Suchen</label>
+	<input id="media-q" name="q" value="{{.Data.Query}}" maxlength="100" placeholder="Name oder Alternativtext">
+	<button type="submit">Suchen</button>
+	{{if .Data.Query}}<a href="{{if .Data.Folder}}/admin/media?folder={{.Data.Folder}}{{else}}/admin/media{{end}}">Suche aufheben</a>{{end}}
+</form>
+
+{{if not .Data.Query}}
+<section aria-labelledby="media-folders-h">
+	<h2 id="media-folders-h">Ordner</h2>
+	{{if .Data.Folders}}
+	<ul class="media-folders">
+	{{- range .Data.Folders}}
+		<li><a href="/admin/media?folder={{.ID}}">{{.Name}}</a></li>
+	{{- end}}
+	</ul>
+	{{else}}<p class="hint">Keine Unterordner.</p>{{end}}
+	<form method="post" action="/admin/media/folders" class="media-inline">
+		<input type="hidden" name="csrf" value="{{.CSRF}}">
+		<input type="hidden" name="parent_id" value="{{.Data.Folder}}">
+		<label for="folder-name">Neuer Ordner</label>
+		<input id="folder-name" name="name" maxlength="80" required placeholder="z. B. Produkte">
+		<button type="submit">Anlegen</button>
+	</form>
+	{{if .Data.Folder}}
+	<details>
+		<summary>Diesen Ordner bearbeiten</summary>
+		<form method="post" action="/admin/media/folders/{{.Data.Folder}}/rename" class="media-inline">
+			<input type="hidden" name="csrf" value="{{.CSRF}}">
+			<label for="folder-rename">Name</label>
+			<input id="folder-rename" name="name" maxlength="80" required value="{{.Data.FolderName}}">
+			<button type="submit">Umbenennen</button>
+		</form>
+		<form method="post" action="/admin/media/folders/{{.Data.Folder}}/delete" data-confirm="Ordner löschen? Das geht nur, wenn er leer ist.">
+			<input type="hidden" name="csrf" value="{{.CSRF}}">
+			<button type="submit" class="link">Ordner löschen</button>
+		</form>
+	</details>
+	{{end}}
+</section>
+{{end}}
+
+<section aria-labelledby="media-files-h">
+	<h2 id="media-files-h">{{if .Data.Query}}Suchergebnisse{{else}}Bilder{{end}}</h2>
+	{{if .Data.Files}}
+	<ul class="media-grid">
+	{{- range .Data.Files}}
+		<li>
+			<a href="{{.EditURL}}">
+				<img src="{{.Thumb}}" alt="" width="{{.Width}}" height="{{.Height}}" loading="lazy">
+				<span class="media-name">{{.Name}}</span>
+			</a>
+			<span class="hint">{{.FullWidth}} × {{.FullHeight}} · {{.Size}}{{if .Decorative}} · dekorativ{{end}}</span>
+		</li>
+	{{- end}}
+	</ul>
+	{{if .Data.More}}<p><a href="{{.Data.Next}}">Weitere Bilder</a></p>{{end}}
+	{{else}}<p class="hint">{{if .Data.Query}}Nichts gefunden.{{else}}Noch keine Bilder in diesem Ordner.{{end}}</p>{{end}}
+</section>
+</div>
+<link rel="stylesheet" href="{{asset "media/media.css"}}">
+<script src="{{asset "media/media-upload.js"}}" defer></script>
+<script src="{{asset "media/media-library.js"}}" defer></script>

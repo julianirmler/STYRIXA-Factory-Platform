@@ -23,9 +23,14 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 		editorJS      = "../../internal/modules/content/static/editor-blocks.js"
 		dashMarker    = `data-styrixa-template="dashboard-home"` // Session 3.4
 		dashTmpl      = "../../internal/modules/dashboard/templates/home.html"
+		mediaMarker   = `data-styrixa-template="media-library"` // Session 4.1
+		mediaTmpl     = "../../internal/modules/media/templates/library.html"
+		pickerMarker  = "media-picker__head" // Bildwähler für den Editor
+		pickerJS      = "../../internal/modules/media/static/media-picker.js"
 		coreMarker    = "Dieser Bereich ist noch in Arbeit" // Kern-Template: immer enthalten
 	)
-	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker, editorJS: editorMarker, dashTmpl: dashMarker} {
+	for tmpl, marker := range map[string]string{shopTmpl: shopMarker, contentTmpl: contentMarker, editorJS: editorMarker, dashTmpl: dashMarker,
+		mediaTmpl: mediaMarker, pickerJS: pickerMarker} {
 		src, err := os.ReadFile(tmpl)
 		if err != nil || !bytes.Contains(src, []byte(marker)) {
 			t.Fatalf("Marker fehlt in %s (Test an das Template anpassen): %v", tmpl, err)
@@ -35,14 +40,14 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 	// Auch Pflichtmodule sind isoliert: ohne mod_content kein Content-Code.
 	const req = "mod_content mod_dashboard"
 	for _, tc := range []struct {
-		tags                  string
-		wantShop, wantContent bool
+		tags                             string
+		wantShop, wantContent, wantMedia bool
 	}{
-		{"", false, false},
-		{req, false, true},
-		{req + " mod_media", false, true},
-		{req + " mod_media mod_shop", true, true},
-		{"mod_media mod_shop", true, false},
+		{"", false, false, false},
+		{req, false, true, false},
+		{req + " mod_media", false, true, true},
+		{req + " mod_media mod_shop", true, true, true},
+		{"mod_media mod_shop", true, false, true},
 	} {
 		t.Run("tags="+tc.tags, func(t *testing.T) {
 			t.Parallel()
@@ -71,6 +76,11 @@ func TestAdminTemplateBuildTagIsolation(t *testing.T) {
 			}
 			if got := bytes.Contains(b, []byte(editorMarker)); got != tc.wantContent {
 				t.Errorf("Editor-Skripte im Binary: %v, erwartet %v", got, tc.wantContent)
+			}
+			for _, mk := range []string{mediaMarker, pickerMarker} {
+				if got := bytes.Contains(b, []byte(mk)); got != tc.wantMedia {
+					t.Errorf("Media-Datei (%s) im Binary: %v, erwartet %v", mk, got, tc.wantMedia)
+				}
 			}
 		})
 	}
