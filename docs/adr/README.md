@@ -130,3 +130,15 @@ Erlaubte Abhängigkeiten: `modernc.org/sqlite`, `golang.org/x/crypto`. Sonst nur
 **Voraussetzung (vor der Umsetzung prüfen):** `tools/hoster-probe/styrixa-probe.php` meldet auf dem Webspace `proc_open: ja`, `exec_own_binary: ja` und SQLite-WAL nicht `NEIN`. Schlägt die Probe fehl, ist dieser Tarif nicht geeignet → **easyname vServer** (SSH-Deployment, schon fertig) oder ein Webspace mit CGI.
 
 **Warum:** Günstigste Lösung, die die verbreitetsten PHP-Webspaces abdeckt, ohne das CMS in PHP neu zu schreiben. Kosten: ein Prozessstart pro Anfrage über PHP (vergleichbar mit CGI).
+
+## 013 – Externe Analyse (Google Analytics) nur mit Einwilligung
+
+**Anlass:** 27.11.2026 – Wunsch, Google Analytics 4 und die Google Search Console einzubinden. Das CMS ist bisher bewusst cookiefrei (3.4) und braucht keinen Banner.
+
+**Entscheidung:**
+- **Search Console** über den Bestätigungs-Meta-Tag im SEO-Modul (4.2). Kein Skript, keine Cookies → keine Einwilligung nötig.
+- **Google Analytics 4** als **optionale** Funktion des SEO-Moduls (4.7), **standardmäßig aus**. Ist eine Mess-ID hinterlegt, gilt: Laden erst nach ausdrücklicher Einwilligung (Opt-in, § 165 TKG 2021 / Art. 6 Abs. 1 lit. a DSGVO), gleichwertiges „Ablehnen“, Widerruf jederzeit über „Cookie-Einstellungen“. Vor der Einwilligung keine Verbindung zu Google.
+- Eigenes Einwilligungsbanner im CMS (Vanilla JS im Modul, kein externes Consent-Tool, keine neue Abhängigkeit). Google-Skripte werden zur Laufzeit von Google geladen, nicht vendort; das ist die einzige zugelassene externe Skriptquelle und nur nach Einwilligung.
+- Betreiber-Hinweis im Admin: Mit aktivem GA ist die Website nicht mehr bannerfrei; Datenschutzerklärung ergänzen (Textbaustein), Auftragsverarbeitung mit Google in den GA-Einstellungen bestätigen.
+
+**Warum:** Kunden fragen Google Analytics nach; die rechtssichere Variante in Österreich ist nur Opt-in. Standard „aus“ hält das Versprechen „ohne Cookie-Banner“ für alle, die es nicht brauchen.

@@ -5,7 +5,7 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
 **Prinzip:** Günstigste Lösung, die das Risiko beseitigt. Erst ein Durchstich (fertiges CMS wird ausgewählt, deployt, installiert), dann die Module. Jede Session ist eine abgeschlossene Claude-Code-Aufgabe mit Tests als Abnahme und endet mit Commit und `/clear`.
 
 **Legende:** 🟣 = Opus (nur wo Sicherheit oder Architektur es verlangen), sonst Sonnet.
-**Umfang:** **40 Sessions** (vorher 44, dann 34; +5 Shop nach AT/EU-Recht am 25.11.2026, +1 PHP-Brücke für easyname am 26.11.2026), ca. **0,7–1,15 Mio. Output-Tokens**, ca. 65–110 Mio. verarbeitet (überwiegend Cache).
+**Umfang:** **41 Sessions** (vorher 44, dann 34; +5 Shop nach AT/EU-Recht am 25.11.2026, +1 PHP-Brücke für easyname am 26.11.2026, +1 Google Analytics mit Einwilligung am 27.11.2026), ca. **0,7–1,15 Mio. Output-Tokens**, ca. 65–110 Mio. verarbeitet (überwiegend Cache).
 
 **Startprompt für jede Session:**
 > Lies CLAUDE.md, docs/adr/README.md und docs/UMSETZUNGSPLAN.md. Setze Session X.Y um. Abnahme laut Plan, `make check` grün, Session abhaken, committen.
@@ -201,13 +201,21 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - `cms-template/cmd/styrixa/smoke_test.go` (`//go:build smoke`): baut das Binary mit `CGO_ENABLED=0` und den Pflicht-Tags, startet es im Server-Modus auf einem freien Port mit eigenem Datenordner, wartet auf `/healthz`, prüft `/` → 303 `/install`, installiert mit dem Code aus `data/install-code` (Datei danach gelöscht), Login, CSRF-Token aus dem Admin-Layout, Seite „Über uns“ anlegen, Blöcke (Überschrift, Absatz mit `<b>` und eingeschleustem `<script>`, Liste) als Entwurf speichern, Entwurf öffentlich 404, veröffentlichen, `/ueber-uns` als Besucher ohne Session 200 mit Inhalt (Anker-ID, Inline-Allowlist, `<script>` escaped, kein `Set-Cookie`), zum Schluss `/install` = 404. Server-Log wird nur bei Fehlschlag ausgegeben.
     - Neues Ziel `make smoke` (auch Teil von `make check`), eigener CI-Schritt im `check`-Job (`ubuntu-latest` = linux/amd64, `timeout-minutes: 2`). Laufzeit lokal ≈ 3 s inkl. Build.
 
-## Phase 4 – Optionale Module → M3 (6 Sessions)
+## Phase 4 – Optionale Module → M3 (7 Sessions)
 
 - [ ] **4.1** Media: Upload, Ordner, Alt-Texte; Verkleinerung/Umwandlung im Browser (ADR-001), `srcset`
-- [ ] **4.2** SEO: Meta-Felder, Sitemap, robots.txt, 301-Redirects
+- [ ] **4.2** SEO: Meta-Felder, Sitemap, robots.txt, 301-Redirects, **Google Search Console**
+  - Search Console: Bestätigungscode im Admin eintragen (nur der Wert aus `<meta name="google-site-verification" content="…">`, Format streng geprüft) → Meta-Tag im `<head>` über `stx:head`; Hinweis auf die Alternative per DNS-TXT-Eintrag; Sitemap-URL zum Einreichen anzeigen. Setzt keine Cookies, lädt nichts von Google → keine Einwilligung nötig.
+  - *Abnahme:* Meta-Tag erscheint nur mit hinterlegtem Code; ungültige Eingaben (HTML, Anführungszeichen) werden abgelehnt.
 - [ ] **4.3** GEO: JSON-LD (Organization/LocalBusiness mit GISA, FAQ, Article), `llms.txt`, Answer-First-Hinweis im Editor
 - [ ] **4.4** Users: RBAC (Admin, Redakteur, Autor, Kunde), 2FA per TOTP (RFC 6238, Standardbibliothek), Aktivitätsprotokoll
 - [ ] **4.5** Design: Theme-Tokens → CSS-Variablen, Fonts lokal (DSGVO), Template-Auswahl
+- [ ] **4.7** Google Analytics 4 mit Einwilligung (ADR-013), im SEO-Modul (`mod_seo`), **standardmäßig aus**
+  - Mess-ID (`G-XXXXXXXXXX`, Format geprüft) im Admin. Erst dann erscheint ein **Einwilligungsbanner** (Opt-in, „Ablehnen“ gleichwertig zu „Akzeptieren“, keine vorausgewählten Häkchen, Website ohne Einwilligung voll nutzbar). `gtag.js` wird **erst nach Zustimmung** nachgeladen – vorher keine einzige Anfrage an Google (auch kein Consent-Mode-„advanced“-Ping).
+  - Entscheidung speichern: First-Party-Cookie mit Version, 12 Monate; jederzeit widerrufbar über den Link „Cookie-Einstellungen“ im Footer (Pflicht-Hook im Theme); bei Widerruf GA-Cookies löschen. IP-Kürzung/Datenschutz-Einstellungen von GA4 als Hinweis im Admin.
+  - CSP erlaubt Google-Domains nur, wenn GA aktiv ist. Textbaustein für die Datenschutzerklärung (Zweck, Empfänger Google, Drittlandübermittlung auf Basis des EU-US Data Privacy Framework, Speicherdauer, Widerruf) wird im Admin angezeigt.
+  - Die eigene cookiefreie Zählung (3.4) bleibt unabhängig davon aktiv.
+  - *Abnahme:* Test ohne Einwilligung = 0 Anfragen an Google-Domains und kein GA-Cookie; nach Zustimmung `gtag.js` geladen; nach Widerruf wieder 0; Banner gleichwertig bedienbar mit Tastatur.
 - [ ] **4.6** Themes: `theme.json` v1, ZIP-Prüfung (Zip-Slip, Größen- und Dateianzahl-Limits, keine ausführbaren Dateien, keine Symlinks), Aktivierung, Rollback; Guard `mod_themes → mod_design`
 
 **M3:** Alle 8 Module fertig, alle 36 Kombinationen gebaut und getestet.
