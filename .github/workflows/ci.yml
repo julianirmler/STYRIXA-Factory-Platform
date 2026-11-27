@@ -29,6 +29,9 @@ jobs:
         run: make test
       - name: M1 – RSS mit allen Modulen anzeigen (< 20 MB, läuft auch in make test)
         run: cd cms-template && go test -count=1 -v -tags "mod_content mod_dashboard" -run '^TestServerRSSBelow20MB$' ./cmd/styrixa | grep -E 'RSS|ok|FAIL'
+      - name: Smoke-Test (ADR-010, linux/amd64)
+        timeout-minutes: 2
+        run: make smoke
       - name: Keine CGO-Abhängigkeiten
         run: make cgo
       - name: Alle Modul-Kombinationen bauen + Negativtests

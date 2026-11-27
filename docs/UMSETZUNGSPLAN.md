@@ -195,8 +195,11 @@ Visuelle Übersicht: [Whiteboard „STYRIXA Factory – Umsetzungsplan“](https
     - **Version:** neues `core.Version` (Standard `dev`); `scripts/matrix-build.sh` setzt es per `-ldflags -X` aus `STYRIXA_VERSION`, `release.yml` übergibt den Git-Tag.
     - Aufräumen: Lazy-Job `dashboard.prune_hits` (täglich) löscht Tage älter als 400 Tage.
     - Tests: Bot-Erkennung, Zählung nur öffentlicher Seiten ohne `Set-Cookie`, Tageswechsel, Schema ohne Personenbezug, Grenzen (Pfadlänge, ungültiges UTF-8, Admin), Dashboard-Seite (7/30-Tage-Fenster, Top-Seiten, Status, Schnellzugriffe), Aufräumen; Kern: `TestPublicHitCounter` (welche Antworten zählen). Isolationstest um den Dashboard-Marker erweitert. Im Browser (lokal) geprüft: Zählung, Googlebot nicht gezählt, kein Cookie, Anzeige.
-- [ ] **3.5** Smoke-Test (ADR-010): Binary starten → `/install` → Login → Seite anlegen → öffentlich abrufen; in CI
+- [x] **3.5** Smoke-Test (ADR-010): Binary starten → `/install` → Login → Seite anlegen → öffentlich abrufen; in CI
   - *Abnahme:* Smoke-Test läuft in CI
+  - *Erledigt 2026-11-27, Abweichungen/Entscheidungen:*
+    - `cms-template/cmd/styrixa/smoke_test.go` (`//go:build smoke`): baut das Binary mit `CGO_ENABLED=0` und den Pflicht-Tags, startet es im Server-Modus auf einem freien Port mit eigenem Datenordner, wartet auf `/healthz`, prüft `/` → 303 `/install`, installiert mit dem Code aus `data/install-code` (Datei danach gelöscht), Login, CSRF-Token aus dem Admin-Layout, Seite „Über uns“ anlegen, Blöcke (Überschrift, Absatz mit `<b>` und eingeschleustem `<script>`, Liste) als Entwurf speichern, Entwurf öffentlich 404, veröffentlichen, `/ueber-uns` als Besucher ohne Session 200 mit Inhalt (Anker-ID, Inline-Allowlist, `<script>` escaped, kein `Set-Cookie`), zum Schluss `/install` = 404. Server-Log wird nur bei Fehlschlag ausgegeben.
+    - Neues Ziel `make smoke` (auch Teil von `make check`), eigener CI-Schritt im `check`-Job (`ubuntu-latest` = linux/amd64, `timeout-minutes: 2`). Laufzeit lokal ≈ 3 s inkl. Build.
 
 ## Phase 4 – Optionale Module → M3 (6 Sessions)
 
