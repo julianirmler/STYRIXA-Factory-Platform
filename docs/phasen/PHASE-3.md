@@ -117,7 +117,7 @@ Vorhanden – benutzen, nicht neu bauen:
 - [x] 3.3 Auto-Save, Vorschau, Revision wiederherstellbar, kein Datenverlust
 - [x] 3.4 Dashboard ohne Cookies/personenbezogene Daten
 - [x] 3.5 Smoke-Test in CI
-- [ ] `make check` und CI grün
+- [x] `make check` und CI grün
 
 ## Abschluss jeder Session
 
